@@ -1,18 +1,26 @@
+from django.utils import timezone
+
+from dateutil.relativedelta import relativedelta
+from django.db.models.aggregates import Count
 from django.shortcuts import render
 from drf_spectacular.utils import extend_schema
 
 from rest_framework.views import APIView
+from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
-from rest_framework.generics import GenericAPIView
+from rest_framework.generics import ListAPIView
+
+from authentication.models import GIE
 
 from .serializers import (
     ConnexionSerializer,
     DeconnexionSerializer,
     GIECreationSerializer,
+    GIESerializer,
     InscriptionPresidentSerializer,
     VerifierOTPSerializer
 )
@@ -57,6 +65,62 @@ class CreerGIEView(APIView):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+# lister les GIE
+class ListeGIEView(ListAPIView):
+    queryset = GIE.objects.all().order_by('-date_creation')
+    serializer_class = GIESerializer
+    permission_classes = [AllowAny]
+
+
+# Voir detail d'un GIE
+class DetailGIEView(RetrieveUpdateAPIView):
+    queryset = GIE.objects.all()
+    serializer_class = GIESerializer
+    permission_classes = [AllowAny]
+
+
+class StatistiquesGIEView(APIView):
+
+    permission_classes = [AllowAny]
+    serializer_class = GIESerializer
+
+    @extend_schema(
+        request=GIESerializer
+    )
+
+    def get(self, request):
+        
+        total_gies = GIE.objects.count()
+
+        gies_actifs = GIE.objects.filter(
+            statut='actif'
+        ).count()
+
+        gies_inactifs = GIE.objects.filter(
+            statut='inactif'
+        ).count()
+
+
+        total_regions = GIE.objects.values(
+            'region'
+        ).distinct().count()
+
+        total_secteurs = GIE.objects.values(
+            'secteur'
+        ).distinct().count()
+
+        total_membres = Utilisateur.objects.filter(
+            gie__isnull=False
+        ).count()
+
+        return Response({
+            'total_gies': total_gies,
+            'gies_actifs': gies_actifs,
+            'gies_inactifs': gies_inactifs,
+            'total_regions': total_regions,
+            'total_secteurs': total_secteurs,
+            'total_membres': total_membres,
+        })
 
 class InscriptionPresidentView(APIView):
     """
@@ -180,3 +244,86 @@ class DeconnexionView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
+
+
+class EvolutionGIEView(APIView):
+    permission_classes = [AllowAny]
+
+
+    def get(self, request):
+
+        mois_francais = {
+            'January': 'Janvier',
+            'February': 'Février',
+            'March': 'Mars',
+            'April': 'Avril',
+            'May': 'Mai',
+            'June': 'Juin',
+            'July': 'Juillet',
+            'August': 'Août',
+            'September': 'Septembre',
+            'October': 'Octobre',
+            'November': 'Novembre',
+            'December': 'Décembre',
+        }
+        aujourd_hui = timezone.now()
+
+        resultats = []
+
+        for i in range(4, -1, -1):
+            date_mois = aujourd_hui - relativedelta(months=i)
+
+            debut_mois = date_mois.replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+            fin_mois = debut_mois + relativedelta(months=1)
+
+            total = GIE.objects.filter(
+                date_creation__lt=fin_mois
+            ).count()
+
+            resultats.append({
+                'mois': mois_francais[debut_mois.strftime('%B')],
+                'total': total
+            })
+
+        return Response(resultats)
+
+
+class RepartitionSecteursView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+
+        # Nombre total de GIE
+        total_gies = GIE.objects.count()
+
+        # Nombre de GIE par secteur
+        gies_par_secteur = GIE.objects.values(
+            'secteur'
+        ).annotate(
+            total=Count('id')
+        )
+
+        resultats = []
+
+        # Éviter une division par zéro
+        if total_gies == 0:
+            return Response(resultats)
+
+        # Calcul du pourcentage pour chaque secteur
+        for item in gies_par_secteur:
+
+            pourcentage = (item['total'] / total_gies) * 100
+
+            resultats.append({
+                'secteur': item['secteur'],
+                'pourcentage': round(pourcentage, 2)
+            })
+
+        return Response(resultats)

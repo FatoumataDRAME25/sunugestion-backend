@@ -51,7 +51,7 @@ class GIE(models.Model):
 
 class UtilisateurManager(BaseUserManager):
 
-    def create_user(self, telephone, nom, prenom, role, gie=None, password=None):
+    def create_user(self, telephone, nom, prenom, role, gie=None, password=None, **extra_fields):
         if not telephone:
             raise ValueError("Le numéro de téléphone est obligatoire")
         
@@ -60,7 +60,8 @@ class UtilisateurManager(BaseUserManager):
             nom=nom,
             prenom=prenom,
             role=role,
-            gie=gie
+            gie=gie,
+            **extra_fields
         )
         if password:
             utilisateur.set_password(password)

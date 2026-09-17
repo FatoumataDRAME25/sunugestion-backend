@@ -6,6 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('authentication.urls')),
+    path('api/membres/', include('membres.urls')),
     
     # Endpoint de téléchargement du schéma JSON/YAML
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

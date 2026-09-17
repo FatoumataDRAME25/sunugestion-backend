@@ -14,7 +14,8 @@ class GIECreationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GIE
-        fields = ['nom', 'region', 'secteur', 'telephone', 'photo']
+        fields = ['id','nom', 'region', 'secteur', 'telephone', 'photo']
+        
 
     def validate_nom(self, valeur):
         if not valeur.strip():
@@ -34,6 +35,28 @@ class GIECreationSerializer(serializers.ModelSerializer):
             statut='en_attente'
         )
         return gie
+
+
+class GIESerializer(serializers.ModelSerializer):
+    nombre_membres = serializers.SerializerMethodField()
+    class Meta:
+        model = GIE
+        fields = [
+            'id',
+            'nom',
+            'region',
+            'secteur',
+            'telephone',
+            'photo',
+            'code',
+            'date_creation',
+            'statut',
+            'nombre_membres'
+        ]
+        read_only_fields = ['id', 'code', 'date_creation']
+
+    def get_nombre_membres(self, gie):
+        return gie.membres.count()
 
 
 class InscriptionPresidentSerializer(serializers.ModelSerializer):
