@@ -53,7 +53,9 @@ INSTALLED_APPS = [
     'corsheaders',
     'djangorestframework_camel_case',  # permet d'avoir les memes nommanclature des champs des que le frontend
     'authentication',
-    'membres'
+    'membres',
+    'cotisations',
+    'historiques',
 ]
 
 # Modèle utilisateur personnalisé
