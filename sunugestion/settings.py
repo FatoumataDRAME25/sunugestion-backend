@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     'membres',
     'cotisations',
     'historiques',
+    'prets',
+    'extraction',
 ]
 
 # Modèle utilisateur personnalisé
