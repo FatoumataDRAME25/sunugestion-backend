@@ -1,10 +1,11 @@
 from django.shortcuts import render
 
 
+from drf_spectacular.plumbing import get_view_model
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import APIView, action
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from authentication.models import Utilisateur
@@ -209,12 +210,8 @@ class MembreViewSet(viewsets.ViewSet):
 
             return Response(
                 {
-                    'message': (
-                        f'Membre ajouté. '
-                        f'Un SMS sera envoyé au '
-                        f'{membre.telephone}.'
-                    ),
-
+                    'message': f'Membre ajouté avec succès.',
+                    'token_invitation': membre.token_invitation, 
                     'membre': {
                         'id': membre.id,
                         'prenom': membre.prenom,
@@ -354,3 +351,53 @@ class MembreViewSet(viewsets.ViewSet):
             },
             status=status.HTTP_201_CREATED # <-- Fini l'erreur 400 automatique
         )
+
+
+    @action(
+    detail=False,
+    methods=['post'],
+    url_path='activation-compte',
+    permission_classes=[AllowAny]  # 🔓 Accessible sans être connecté
+    )
+
+    def activation_publique(self, request):
+        token = request.data.get('token')
+        pin = request.data.get('pin')  # Le code PIN à 4 chiffres choisi par le membre
+
+        if not token:
+            return Response(
+                {"erreur": "Le jeton d'activation est manquant."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        if not pin or not str(pin).isdigit() or len(str(pin)) != 4:
+            return Response(
+                {"erreur": "Le code PIN doit être un nombre de 4 chiffres."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            # Recherche de l'utilisateur avec son jeton d'invitation unique
+            utilisateur = Utilisateur.objects.get(token_invitation=token)
+            
+            # Mise à jour du mot de passe (PIN) et passage au statut actif
+            utilisateur.set_password(pin)
+            utilisateur.statut = 'actif'
+            utilisateur.is_active = True
+            
+            # 🔐 Sécurité : destruction du jeton d'invitation après son premier usage
+            utilisateur.token_invitation = None
+            utilisateur.save()
+            
+            return Response(
+                {"message": "Votre compte a été activé avec succès !"}, 
+                status=status.HTTP_200_OK
+            )
+            
+        except Utilisateur.DoesNotExist:
+            return Response(
+                {"erreur": "Le lien d'activation est invalide ou a expiré."}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+

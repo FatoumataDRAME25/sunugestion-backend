@@ -4,14 +4,18 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
-from cotisations.models import Cotisation
+from cotisations.models import Cotisation, SessionCotisation
 from historiques.models import HistoriqueOperation
 from .serializers import CotisationPaiementSerializer, CotisationSerializer, SessionCotisationSerializer
 
-class SessionCotisationCreateView(generics.CreateAPIView):
+class SessionCotisationCreateView(generics.ListCreateAPIView):
 
     serializer_class = SessionCotisationSerializer
 
+    def get_queryset(self):
+        return SessionCotisation.objects.filter(
+            createur__gie=self.request.user.gie
+        )
 
 
 class CotisationListView(generics.ListAPIView):

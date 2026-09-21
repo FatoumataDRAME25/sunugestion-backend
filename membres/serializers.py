@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from sunugestion.settings import APP_URL
 import re
 
 Utilisateur = get_user_model()
@@ -104,15 +105,17 @@ class AjoutMembreSerializer(serializers.Serializer):
         # Génération du token d'invitation
         membre.generer_token_invitation()
 
-        # TODO : envoyer le SMS avec Africa's Talking
-        lien = (
-            f"https://sunugestion.sn/rejoindre"
-            f"?token={membre.token_invitation}"
-        )
+        # 🚀 CORRECTION DU LIEN (Syntaxe Python propre)
+        lien = f"http://localhost:4200/activation?token={membre.token_invitation}"
+        
+        # 📱 AFFICHAGE SÉCURISÉ DANS LE TERMINAL
+        print("\n" + "="*60)
+        print(f"📱 [SIMULATION SMS] Envoyé au {membre.telephone}")
+        print(f"Message : Bienvenue sur SunuGestion ! Activez votre compte ici : {lien}")
+        print("="*60 + "\n")
 
-        print(
-            f"SMS à envoyer au {membre.telephone} : {lien}"
-        )
+        # TODO : Plus tard, intégrer l'envoi réel avec le SDK Africa's Talking ici
+
 
         return membre
 

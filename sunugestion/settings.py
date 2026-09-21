@@ -34,7 +34,7 @@ SECRET_KEY = 'django-insecure-#z06hmd#@-e9b(meis@yi#xrc2n(($lfwd_6j6+qhx66c9__m#
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -117,6 +117,7 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
     "http://127.0.0.1:4200",
+    'https://stitch-freebie-dreamless.ngrok-free.dev'
 ]
 
 ROOT_URLCONF = 'sunugestion.urls'
@@ -212,3 +213,6 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+API_URL= config('API_URL', default='http://localhost:8000')
+APP_URL = config('APP_URL', default='http://localhost:4200')
