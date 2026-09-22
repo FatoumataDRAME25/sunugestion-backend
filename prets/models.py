@@ -2,10 +2,47 @@ from django.db import models
 
 from django.conf import settings
 
+
+from django.db import models
+
+
+class ReglePret(models.Model):
+
+    gie = models.OneToOneField(
+        'authentication.GIE',
+        on_delete=models.CASCADE,
+        related_name='regle_pret'
+    )
+
+    montant_max = models.DecimalField(
+        max_digits=12,
+        decimal_places=0
+    )
+
+    duree_max_mois = models.PositiveIntegerField()
+
+    nombre_prets_simultanes = models.PositiveIntegerField(
+        default=1
+    )
+
+    cotisation_a_jour_obligatoire = models.BooleanField(
+        default=True
+    )
+
+    def __str__(self):
+        return f"Règles de prêt - {self.gie.nom}"
+
+    class Meta:
+        verbose_name = "Règle de prêt"
+        verbose_name_plural = "Règles de prêt"
+        db_table = "regle_pret"
+
+
 class Pret(models.Model):
     
     STATUT_CHOICES = [
         ('en_cours', 'En cours'),
+        ('approuve', 'Approuvé'),
         ('en_attente', 'En attente'),
         ('rembourse', 'Remboursé'),
         ('refuse', 'Refusé'),
@@ -28,9 +65,10 @@ class Pret(models.Model):
         decimal_places=0
     )
     date_demande = models.DateField(auto_now_add=True)
-    date_echeance = models.DateField()
+    date_echeance = models.DateField( null=True, blank=True)
     date_remboursement = models.DateField( null=True, blank=True)
     date_approbation = models.DateTimeField( null=True, blank=True)
+    duree_mois = models.PositiveIntegerField(null=True, blank=True)
 
     statut = models.CharField(
         max_length=20,

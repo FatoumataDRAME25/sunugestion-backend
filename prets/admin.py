@@ -1,3 +1,5 @@
 from django.contrib import admin
+from prets.models import Pret, ReglePret
 
-# Register your models here.
+admin.site.register(ReglePret)
+admin.site.register(Pret)

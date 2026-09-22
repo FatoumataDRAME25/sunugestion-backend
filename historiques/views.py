@@ -1,18 +1,43 @@
-from django.db.models.aggregates import Sum
-from django.shortcuts import render
+from django.db.models import Sum
+
 from rest_framework import generics, serializers
-
 from rest_framework.response import Response
-from historiques.models import HistoriqueOperation
-from historiques.serializers import HistoriqueOperationSerializer, OperationCreateSerializer, SoldeSerializer
 
-# Create your views here.
+from historiques.models import HistoriqueOperation
+from historiques.serializers import (
+    HistoriqueOperationSerializer,
+    OperationCreateSerializer,
+    SoldeSerializer
+)
+
+
+def calculer_solde(gie):
+
+    total_entrees = HistoriqueOperation.objects.filter(
+        gie=gie,
+        type_operation='entree'
+    ).aggregate(
+        total=Sum('montant')
+    )['total'] or 0
+
+    total_sorties = HistoriqueOperation.objects.filter(
+        gie=gie,
+        type_operation='sortie'
+    ).aggregate(
+        total=Sum('montant')
+    )['total'] or 0
+
+    solde = total_entrees - total_sorties
+
+    return total_entrees, total_sorties, solde
+
 
 class HistoriqueOperationListView(generics.ListAPIView):
 
     serializer_class = HistoriqueOperationSerializer
 
     def get_queryset(self):
+
         return HistoriqueOperation.objects.filter(
             gie=self.request.user.gie
         )
@@ -26,21 +51,7 @@ class SoldeView(generics.GenericAPIView):
 
         gie = request.user.gie
 
-        total_entrees = HistoriqueOperation.objects.filter(
-            gie=gie,
-            type_operation='entree'
-        ).aggregate(
-            total=Sum('montant')
-        )['total'] or 0
-
-        total_sorties = HistoriqueOperation.objects.filter(
-            gie=gie,
-            type_operation='sortie'
-        ).aggregate(
-            total=Sum('montant')
-        )['total'] or 0
-
-        solde = total_entrees - total_sorties
+        total_entrees, total_sorties, solde = calculer_solde(gie)
 
         donnees = {
             'total_entrees': total_entrees,
@@ -63,25 +74,12 @@ class OperationCreateView(generics.CreateAPIView):
 
         if serializer.validated_data['type_operation'] == 'sortie':
 
-            total_entrees = HistoriqueOperation.objects.filter(
-                gie=gie,
-                type_operation='entree'
-            ).aggregate(
-                total=Sum('montant')
-            )['total'] or 0
-
-            total_sorties = HistoriqueOperation.objects.filter(
-                gie=gie,
-                type_operation='sortie'
-            ).aggregate(
-                total=Sum('montant')
-            )['total'] or 0
-
-            solde = total_entrees - total_sorties
+            solde = calculer_solde(gie)
 
             montant_sortie = serializer.validated_data['montant']
 
             if montant_sortie > solde:
+
                 raise serializers.ValidationError(
                     {
                         'montant': (

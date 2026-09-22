@@ -9,8 +9,7 @@ class Person(BaseModel):
     telephone: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
-    date_naissance: Optional[str] = None
-    numero_piece: Optional[str] = None
+
     adresse: Optional[str] = None
 
     model_config = ConfigDict(extra="allow")
