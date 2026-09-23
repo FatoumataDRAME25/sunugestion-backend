@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'historiques',
     'prets',
     'extraction',
+    'activites'
 ]
 
 # Modèle utilisateur personnalisé
