@@ -454,16 +454,13 @@ class PretRemboursementView(generics.GenericAPIView):
                 }
             )
 
-        serializer = self.get_serializer(
-            data=request.data
-        )
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer = self.get_serializer(data=request.data, context={
+            'request': request,
+            'pret': pret,
+        })
+        serializer.is_valid(raise_exception=True)
 
-        mode_paiement = serializer.validated_data[
-            'mode_paiement'
-        ]
+        mode_paiement = serializer.validated_data['mode_paiement']
 
         with transaction.atomic():
 

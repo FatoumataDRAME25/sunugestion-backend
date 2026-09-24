@@ -59,7 +59,23 @@ class CotisationSerializer(serializers.ModelSerializer):
 class CotisationPaiementSerializer(serializers.Serializer):
 
     mode_paiement = serializers.ChoiceField(
-        choices=[
-            ('especes', 'Espèces'),
-        ]
+        choices=Cotisation.MODE_PAIEMENT_CHOICES
     )
+
+    def validate_mode_paiement(self, value):
+        request = self.context.get('request')
+        cotisation = self.context.get('cotisation')
+
+        # Si le membre paie pour lui-même → Wave ou Orange Money uniquement
+        # Si le trésorier paie pour un autre → Espèces uniquement
+        if request and cotisation:
+            paye_pour_soi = request.user == cotisation.membre
+            if paye_pour_soi and value == 'especes':
+                raise serializers.ValidationError(
+                    "Un membre qui paie pour lui-même doit utiliser Wave ou Orange Money."
+                )
+            if not paye_pour_soi and value != 'especes':
+                raise serializers.ValidationError(
+                    "Le paiement pour un autre membre doit se faire en espèces."
+                )
+        return value

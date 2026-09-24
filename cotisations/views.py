@@ -49,7 +49,10 @@ class CotisationPaiementView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, context={
+            'request': request,
+            'cotisation': cotisation,
+        })
         serializer.is_valid(raise_exception=True)
 
         mode_paiement = serializer.validated_data['mode_paiement']
