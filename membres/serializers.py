@@ -105,17 +105,9 @@ class AjoutMembreSerializer(serializers.Serializer):
         # Génération du token d'invitation
         membre.generer_token_invitation()
 
-        # 🚀 CORRECTION DU LIEN (Syntaxe Python propre)
-        lien = f"http://localhost:4200/activation?token={membre.token_invitation}"
-        
-        # 📱 AFFICHAGE SÉCURISÉ DANS LE TERMINAL
-        print("\n" + "="*60)
-        print(f"📱 [SIMULATION SMS] Envoyé au {membre.telephone}")
-        print(f"Message : Bienvenue sur SunuGestion ! Activez votre compte ici : {lien}")
-        print("="*60 + "\n")
-
-        # TODO : Plus tard, intégrer l'envoi réel avec le SDK Africa's Talking ici
-
+        # Envoi du lien d'activation par SMS
+        from membres.utils import envoyer_invitation
+        envoyer_invitation(membre)
 
         return membre
 
@@ -292,27 +284,26 @@ class MembreSerializer(serializers.ModelSerializer):
             'prenom',
             'nom',
             'telephone',
+            'email',
             'role',
             'statut',
         ]
 
-        # Ces champs sont visibles mais ne peuvent pas
-        # être modifiés avec PATCH.
+        # Champs protégés :
+        # role   → modifiable uniquement via modifier_role (président)
+        # statut → modifiable uniquement via suspendre/reactiver (président)
+        # gie    → jamais modifiable par l'utilisateur (non exposé dans fields)
         read_only_fields = [
             'id',
+            'role',
+            'statut',
         ]
 
     def validate_prenom(self, valeur):
-        return valider_nom_prenom(
-            valeur,
-            "prénom"
-        )
+        return valider_nom_prenom(valeur, "prénom")
 
     def validate_nom(self, valeur):
-        return valider_nom_prenom(
-            valeur,
-            "nom"
-        )
+        return valider_nom_prenom(valeur, "nom")
 
     def validate_telephone(self, valeur):
 
@@ -342,3 +333,21 @@ class MembreSerializer(serializers.ModelSerializer):
             )
 
         return telephone
+
+    def validate_email(self, valeur):
+        """
+        Valide l'unicité de l'email en excluant l'utilisateur courant.
+        Le champ est optionnel (null=True, blank=True dans le modèle).
+        """
+        if not valeur:
+            return valeur
+
+        valeur = str(valeur).strip().lower()
+        utilisateur = self.instance
+
+        if Utilisateur.objects.filter(email=valeur).exclude(id=utilisateur.id).exists():
+            raise serializers.ValidationError(
+                "Cette adresse email est déjà utilisée."
+            )
+
+        return valeur

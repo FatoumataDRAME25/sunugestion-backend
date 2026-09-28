@@ -82,6 +82,22 @@ class Pret(models.Model):
         blank=True
     )
 
+    token_paydunya = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Token PayDunya de la facture de remboursement en attente"
+    )
+
+    token_decaissement_paydunya = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Token PayDunya du décaissement (Pay-out) en attente"
+    )
+
     def __str__(self):
         return f"Prêt de {self.membre} — {self.montant} — {self.statut}"
 

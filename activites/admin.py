@@ -1,3 +1,4 @@
 from django.contrib import admin
+from activites.models import Activite
 
-# Register your models here.
+admin.site.register(Activite)

@@ -38,6 +38,14 @@ class HistoriqueOperation(models.Model):
         related_name='operations'
     )
 
+    pret = models.ForeignKey(
+        'prets.Pret',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='operations'
+    )
+
     date_operation = models.DateTimeField(
         auto_now_add=True
     )

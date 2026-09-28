@@ -10,7 +10,8 @@ class SessionCotisationSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        createur = self.context['request'].user
+        # createur est injecté par perform_create via serializer.save(createur=...)
+        createur = validated_data.pop('createur')
         session = SessionCotisation.objects.create(
             createur=createur,
             **validated_data

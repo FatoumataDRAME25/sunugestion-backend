@@ -1,6 +1,9 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 
 from .models import Activite, Presence
+
+Utilisateur = get_user_model()
 
 
 class ActiviteSerializer(serializers.ModelSerializer):
@@ -30,36 +33,47 @@ class ActiviteSerializer(serializers.ModelSerializer):
             'statut',
         ]
 
+    def validate(self, attrs):
+        instance = self.instance
 
-        def validate(self, attrs):
-            instance = self.instance
+        if instance:
+            statut = instance.statut
 
-            if instance:
-                statut = instance.statut
+            if 'ordre_du_jour' in attrs:
+                if statut == 'planifiee':
+                    raise serializers.ValidationError({
+                        'ordre_du_jour': (
+                            "L'ordre du jour ne peut être renseigné "
+                            "que lorsque l'activité est en cours."
+                        )
+                    })
 
-                # L'activité doit être en cours
-                # pour pouvoir renseigner l'ordre du jour
-                if 'ordre_du_jour' in attrs:
-                    if statut == 'planifiee':
-                        raise serializers.ValidationError({
-                            'ordre_du_jour': (
-                                "L'ordre du jour ne peut être renseigné "
-                                "que lorsque l'activité est en cours."
-                            )
-                        })
+            if 'compte_rendu' in attrs:
+                if statut != 'terminee':
+                    raise serializers.ValidationError({
+                        'compte_rendu': (
+                            "Le compte rendu ne peut être renseigné "
+                            "que lorsque l'activité est terminée."
+                        )
+                    })
 
-                # L'activité doit être terminée
-                # pour pouvoir renseigner le compte rendu
-                if 'compte_rendu' in attrs:
-                    if statut != 'terminee':
-                        raise serializers.ValidationError({
-                            'compte_rendu': (
-                                "Le compte rendu ne peut être renseigné "
-                                "que lorsque l'activité est terminée."
-                            )
-                        })
+        return attrs
 
-            return attrs
+
+class PresenceItemSerializer(serializers.Serializer):
+    """
+    Serializer pour un élément de présence dans la liste.
+    utilisateur est résolu en objet Utilisateur pour permettre
+    les vérifications (gie_id, etc.) dans la vue.
+    """
+    utilisateur = serializers.PrimaryKeyRelatedField(
+        queryset=Utilisateur.objects.all()
+    )
+    statut = serializers.ChoiceField(choices=['present', 'absent'])
+
+
+class EnregistrerPresenceSerializer(serializers.Serializer):
+    presences = PresenceItemSerializer(many=True)
 
 
 class PresenceSerializer(serializers.ModelSerializer):
@@ -78,10 +92,3 @@ class PresenceSerializer(serializers.ModelSerializer):
             'id',
             'activite'
         ]
-
-
-class EnregistrerPresenceSerializer(serializers.Serializer):
-
-    presences = PresenceSerializer(
-        many=True
-    )

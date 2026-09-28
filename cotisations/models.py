@@ -77,6 +77,14 @@ class Cotisation(models.Model):
         default='en_cours'
     )
 
+    token_paydunya = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Token PayDunya de la facture en attente de confirmation"
+    )
+
     def __str__(self):
         return f"{self.membre} — {self.session.libelle} — {self.statut}"
 

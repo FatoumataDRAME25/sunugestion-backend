@@ -58,7 +58,9 @@ INSTALLED_APPS = [
     'historiques',
     'prets',
     'extraction',
-    'activites'
+    'activites',
+    'notifications',
+    'paiements',
 ]
 
 # Modèle utilisateur personnalisé
@@ -219,3 +221,18 @@ MAILERS = {
 
 API_URL= config('API_URL', default='http://localhost:8000')
 APP_URL = config('APP_URL', default='http://localhost:4200')
+
+# PayDunya
+PAYDUNYA_MODE        = config('PAYDUNYA_MODE', default='test')
+PAYDUNYA_MASTER_KEY  = config('PAYDUNYA_MASTER_KEY')
+PAYDUNYA_PRIVATE_KEY = config('PAYDUNYA_PRIVATE_KEY')
+PAYDUNYA_PUBLIC_KEY  = config('PAYDUNYA_PUBLIC_KEY')
+PAYDUNYA_TOKEN       = config('PAYDUNYA_TOKEN')
+PAYDUNYA_CALLBACK_URL = config('PAYDUNYA_CALLBACK_URL', default='')
+
+# Firebase Admin SDK
+# Chemin absolu construit depuis BASE_DIR pour fonctionner aussi bien avec
+# runserver qu'avec CRON (qui ne démarre pas depuis le répertoire du projet).
+FIREBASE_CREDENTIALS_PATH = str(
+    BASE_DIR / 'sunugestion' / 'firebase-credentials.json'
+)

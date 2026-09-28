@@ -2,6 +2,8 @@ from django.utils import timezone
 from datetime import date
 import calendar
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from django.contrib.auth import get_user_model
 from rest_framework.response import Response
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
@@ -9,15 +11,40 @@ from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from historiques.views import calculer_solde
 from historiques.models import HistoriqueOperation
+from notifications.service import envoyer_notification
+from paiements.paydunya_service import (
+    creer_facture,
+    initier_decaissement,
+    soumettre_decaissement,
+    PayDunyaError,
+    PayDunyaNetworkError,
+)
 
 from .models import ReglePret, Pret
 from cotisations.models import Cotisation
 from .serializers import (
-ReglePretSerializer, 
-PretSerializer, 
-PretApprobationSerializer, 
-PretDecaissementSerializer,
-PretRemboursementSerializer)
+    ReglePretSerializer,
+    PretSerializer,
+    PretApprobationSerializer,
+    PretDecaissementSerializer,
+    PretRemboursementSerializer,
+)
+
+Utilisateur = get_user_model()
+
+MODES_ELECTRONIQUES = {'wave', 'orange_money'}
+
+
+def _membres_actifs_roles(gie, roles, exclure_ids=None):
+    """Retourne les membres actifs du GIE ayant un des rôles donnés."""
+    qs = Utilisateur.objects.filter(
+        gie=gie,
+        role__in=roles,
+        statut='actif'
+    )
+    if exclure_ids:
+        qs = qs.exclude(id__in=exclure_ids)
+    return qs
 
 
 def ajouter_mois(date_depart, nombre_mois):
@@ -56,7 +83,7 @@ class ReglePretView(generics.GenericAPIView):
 
         serializer = self.get_serializer(regle)
         return Response(serializer.data)
-    
+
 
     def post(self, request):
         if ReglePret.objects.filter(gie=request.user.gie).exists():
@@ -171,7 +198,7 @@ class PretView(generics.GenericAPIView):
         # Vérifier le nombre de prêts simultanés
         nombre_prets = Pret.objects.filter(
             membre=request.user,
-            statut__in=['en_attente', 'en_cours','approuve']
+            statut__in=['en_attente', 'en_cours', 'approuve']
         ).count()
 
         if nombre_prets >= regle.nombre_prets_simultanes:
@@ -204,9 +231,26 @@ class PretView(generics.GenericAPIView):
                 )
 
         # Créer la demande
-        serializer.save(
+        pret = serializer.save(
             membre=request.user,
             statut='en_attente'
+        )
+
+        # Notifier président + trésorier (sauf le demandeur lui-même)
+        envoyer_notification(
+            destinataires=_membres_actifs_roles(
+                gie=gie,
+                roles=['president', 'tresorier'],
+                exclure_ids=[request.user.id],
+            ),
+            titre="Nouvelle demande de prêt",
+            message=(
+                f"{request.user.prenom} {request.user.nom} "
+                f"a soumis une demande de prêt de {pret.montant} FCFA."
+            ),
+            type_evenement="demande_pret",
+            module="prets",
+            objet_id=pret.id,
         )
 
         return Response(
@@ -214,7 +258,7 @@ class PretView(generics.GenericAPIView):
             status=201
         )
 
-    
+
     def get(self, request, pk=None):
 
         gie = request.user.gie
@@ -336,12 +380,31 @@ class PretApprobationView(generics.GenericAPIView):
                 }
             )
 
-        # Pour l'instant : approbation uniquement
         pret.duree_mois = duree_mois
         pret.date_approbation = timezone.now()
         pret.statut = 'approuve'
-
         pret.save()
+
+        # Notifier le demandeur + les trésoriers actifs du GIE
+        # Le trésorier reçoit toujours la notif (il doit effectuer le décaissement)
+        destinataires = Utilisateur.objects.filter(
+            gie=gie,
+            statut='actif'
+        ).filter(
+            Q(id=pret.membre.id) | Q(role='tresorier')
+        ).distinct()
+
+        envoyer_notification(
+            destinataires=destinataires,
+            titre="Prêt approuvé",
+            message=(
+                f"Le prêt de {pret.montant} FCFA de "
+                f"{pret.membre.prenom} {pret.membre.nom} a été approuvé."
+            ),
+            type_evenement="pret_approuve",
+            module="prets",
+            objet_id=pret.id,
+        )
 
         return Response(PretSerializer(pret).data, status=200)
 
@@ -356,74 +419,118 @@ class PretDecaissementView(generics.GenericAPIView):
         try:
             pret = Pret.objects.get(id=pk)
         except Pret.DoesNotExist:
-            return Response(
-                {
-                    'message': 'Ce prêt n existe pas.'
-                },
-                status=404
-            )
+            return Response({'message': 'Ce prêt n existe pas.'}, status=404)
 
-        # Le prêt doit avoir été approuvé
         if pret.statut != 'approuve':
             raise ValidationError(
-                {
-                    'pret': (
-                        'Seul un prêt approuvé peut être décaissé.'
-                    )
-                }
+                {'pret': 'Seul un prêt approuvé peut être décaissé.'}
             )
 
         gie = pret.membre.gie
 
-        # Vérification du solde actuel
         _, _, solde = calculer_solde(gie)
-
         if pret.montant > solde:
             raise ValidationError(
-                {
-                    'pret': (
-                        'Le solde disponible de la caisse '
-                        'ne permet pas de décaisser ce prêt.'
-                    )
-                }
+                {'pret': 'Le solde disponible de la caisse ne permet pas de décaisser ce prêt.'}
             )
 
-        # Validation du mode de paiement
-        serializer = self.get_serializer(
-            data=request.data
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        mode_paiement = serializer.validated_data['mode_paiement']
+
+        # ─── Décaissement électronique (Pay-out PayDunya) ─────────────────────
+        if mode_paiement in MODES_ELECTRONIQUES:
+            return self._initier_decaissement_electronique(pret, mode_paiement)
+
+        # ─── Décaissement en espèces — comportement inchangé ──────────────────
+        return self._decaissement_especes(pret, mode_paiement)
+
+    def _initier_decaissement_electronique(self, pret, mode_paiement):
+        """
+        Initie un Pay-out PayDunya vers le téléphone du membre.
+        Le prêt N'est PAS marqué comme en_cours ici.
+        Il le sera uniquement après confirmation SUCCESS par PayDunya.
+        """
+        membre = pret.membre
+        reference = f"DECAISSEMENT-PRET-{pret.id}"
+
+        # Supprimer l'indicatif pays si présent (ex: +221771234567 → 771234567)
+        telephone = (membre.telephone or '').lstrip('+').lstrip('221')
+
+        try:
+            # Étape 1 : obtenir le disburse_token
+            resultat_init = initier_decaissement(
+                montant=int(pret.montant),
+                telephone_beneficiaire=telephone,
+                mode_paiement=mode_paiement,
+                reference=reference,
+            )
+
+            disburse_token = resultat_init.get('disburse_token')
+            if not disburse_token:
+                raise PayDunyaError("Token de décaissement absent dans la réponse PayDunya.")
+
+            # Étape 2 : soumettre la facture
+            resultat_soumission = soumettre_decaissement(
+                disburse_token=disburse_token,
+                disburse_id=reference,
+            )
+
+        except PayDunyaNetworkError as exc:
+            return Response({'detail': str(exc)}, status=503)
+        except PayDunyaError as exc:
+            return Response({'detail': str(exc)}, status=502)
+
+        # Sauvegarder le token de décaissement et le mode sans encore marquer en_cours
+        pret.mode_paiement = mode_paiement
+        pret.token_decaissement_paydunya = disburse_token
+        pret.save(update_fields=['mode_paiement', 'token_decaissement_paydunya'])
+
+        statut_soumission = resultat_soumission.get('status', 'created')
+
+        return Response(
+            {
+                'statut': 'en_attente_decaissement',
+                'statut_paydunya': statut_soumission,
+                'mode_paiement': mode_paiement,
+                'disburse_token': disburse_token,
+                'pret': PretSerializer(pret).data,
+            },
+            status=200
         )
-        serializer.is_valid(
-            raise_exception=True
+
+    @transaction.atomic
+    def _decaissement_especes(self, pret, mode_paiement):
+        """Décaissement en espèces — comportement original inchangé."""
+        pret = Pret.objects.select_for_update().get(pk=pret.pk)
+
+        HistoriqueOperation.objects.create(
+            gie=pret.membre.gie,
+            type_operation='sortie',
+            montant=pret.montant,
+            libelle=f'Décaissement du prêt de {pret.membre}',
+            pret=pret,
         )
 
-        mode_paiement = serializer.validated_data[
-            'mode_paiement'
-        ]
+        date_decaissement = timezone.now().date()
+        date_echeance = ajouter_mois(date_decaissement, pret.duree_mois)
 
-        # Décaissement
-        with transaction.atomic():
+        pret.mode_paiement = mode_paiement
+        pret.date_echeance = date_echeance
+        pret.statut = 'en_cours'
+        pret.save()
 
-            HistoriqueOperation.objects.create(
-                gie=gie,
-                type_operation='sortie',
-                montant=pret.montant,
-                libelle=f'Décaissement du prêt de {pret.membre}',
-            )
-
-            # Date de décaissement = aujourd'hui
-            date_decaissement = timezone.now().date()
-
-            # Calcul de la date d'échéance
-            date_echeance = ajouter_mois(
-                date_decaissement,
-                pret.duree_mois
-            )
-
-            pret.mode_paiement = mode_paiement
-            pret.date_echeance = date_echeance
-            pret.statut = 'en_cours'
-
-            pret.save()
+        envoyer_notification(
+            destinataires=[pret.membre],
+            titre="Prêt décaissé",
+            message=(
+                f"Votre prêt de {pret.montant} FCFA a été décaissé. "
+                f"Date d'échéance : {pret.date_echeance}."
+            ),
+            type_evenement="pret_decaisse",
+            module="prets",
+            objet_id=pret.id,
+        )
 
         return Response(PretSerializer(pret).data, status=200)
 
@@ -438,20 +545,11 @@ class PretRemboursementView(generics.GenericAPIView):
         try:
             pret = Pret.objects.get(id=pk)
         except Pret.DoesNotExist:
-            return Response(
-                {
-                    'message': 'Ce prêt n existe pas.'
-                },
-                status=404
-            )
+            return Response({'message': 'Ce prêt n existe pas.'}, status=404)
 
         if pret.statut != 'en_cours':
             raise ValidationError(
-                {
-                    'pret': (
-                        'Seul un prêt en cours peut être remboursé.'
-                    )
-                }
+                {'pret': 'Seul un prêt en cours peut être remboursé.'}
             )
 
         serializer = self.get_serializer(data=request.data, context={
@@ -462,19 +560,95 @@ class PretRemboursementView(generics.GenericAPIView):
 
         mode_paiement = serializer.validated_data['mode_paiement']
 
-        with transaction.atomic():
+        # ─── Remboursement électronique (Wave ou Orange Money) ────────────────
+        if mode_paiement in MODES_ELECTRONIQUES:
+            return self._initier_remboursement_electronique(pret, mode_paiement)
 
-            HistoriqueOperation.objects.create(
-                gie=pret.membre.gie,
-                type_operation='entree',
-                montant=pret.montant,
-                libelle=f'Remboursement du prêt de {pret.membre}',
+        # ─── Remboursement en espèces — comportement inchangé ─────────────────
+        return self._remboursement_especes(request, pret, mode_paiement)
+
+    def _initier_remboursement_electronique(self, pret, mode_paiement):
+        """
+        Crée une facture PayDunya pour le remboursement.
+        Le prêt N'est PAS marqué comme remboursé ici.
+        Il le sera uniquement après confirmation COMPLETED par PayDunya.
+        """
+        membre = pret.membre
+        reference = f"PRET-REMBOURSEMENT-{pret.id}"
+
+        try:
+            resultat = creer_facture(
+                montant=int(pret.montant),
+                description=(
+                    f"Remboursement prêt — {pret.montant} FCFA "
+                    f"({membre.prenom} {membre.nom})"
+                ),
+                reference=reference,
+                nom_client=f"{membre.prenom} {membre.nom}",
+                telephone_client=membre.telephone or '',
+            )
+        except PayDunyaNetworkError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=503
+            )
+        except PayDunyaError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=502
             )
 
-            pret.date_remboursement = timezone.now().date()
-            pret.statut = 'rembourse'
-            pret.mode_paiement = mode_paiement
+        # Sauvegarder le token et le mode sans marquer comme remboursé
+        pret.mode_paiement = mode_paiement
+        pret.token_paydunya = resultat['token']
+        pret.save(update_fields=['mode_paiement', 'token_paydunya'])
 
-            pret.save()
+        return Response(
+            {
+                'statut': 'en_attente_paiement',
+                'mode_paiement': mode_paiement,
+                'token': resultat['token'],
+                'urlPaiement': resultat['url_paiement'],
+                'pret': PretSerializer(pret).data,
+            },
+            status=200
+        )
+
+    @transaction.atomic
+    def _remboursement_especes(self, request, pret, mode_paiement):
+        """
+        Enregistre directement le remboursement en espèces.
+        Comportement identique à l'original.
+        """
+        pret = Pret.objects.select_for_update().get(pk=pret.pk)
+
+        HistoriqueOperation.objects.create(
+            gie=pret.membre.gie,
+            type_operation='entree',
+            montant=pret.montant,
+            libelle=f'Remboursement du prêt de {pret.membre}',
+            pret=pret,
+        )
+
+        pret.date_remboursement = timezone.now().date()
+        pret.statut = 'rembourse'
+        pret.mode_paiement = mode_paiement
+        pret.save()
+
+        envoyer_notification(
+            destinataires=_membres_actifs_roles(
+                gie=pret.membre.gie,
+                roles=['president', 'tresorier'],
+                exclure_ids=[request.user.id],
+            ),
+            titre="Prêt remboursé",
+            message=(
+                f"{pret.membre.prenom} {pret.membre.nom} "
+                f"a remboursé son prêt de {pret.montant} FCFA."
+            ),
+            type_evenement="pret_rembourse",
+            module="prets",
+            objet_id=pret.id,
+        )
 
         return Response(PretSerializer(pret).data, status=200)

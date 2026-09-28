@@ -1,0 +1,5 @@
+Firebase Admin SDK : fichier de credentials introuvable à 'sunugestion/firebase-credentials.json'. Les notifications push ne fonctionneront pas.
+/home/fatoumatadrame/Bureau/Django/sunugestion-backend/venv/lib/python3.12/site-packages/paddle/utils/cpp_extension/extension_utils.py:711: UserWarning: No ccache found. Please be aware that recompiling all source files may be required. You can download and install ccache from: https://github.com/ccache/ccache/blob/master/doc/INSTALL.md
+  warnings.warn(warning_message)
+Cotisations : aucun retard détecté.
+Prêts : aucun retard détecté.
