@@ -1,4 +1,5 @@
 from rest_framework import generics
+from rest_framework.generics import RetrieveAPIView
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status
@@ -8,10 +9,12 @@ from historiques.models import HistoriqueOperation
 from .serializers import CotisationPaiementSerializer, CotisationSerializer, SessionCotisationSerializer
 from notifications.service import envoyer_notification
 from authentication.models import Utilisateur
+from authentication.permissions import EstMembreGIE, EstPresidentOuTresorier
 from paiements.paydunya_service import (
     creer_facture,
     PayDunyaError,
     PayDunyaNetworkError,
+    _RETURN_URL,
 )
 
 # Modes qui déclenchent un paiement électronique via PayDunya
@@ -21,6 +24,13 @@ MODES_ELECTRONIQUES = {'wave', 'orange_money'}
 class SessionCotisationCreateView(generics.ListCreateAPIView):
 
     serializer_class = SessionCotisationSerializer
+
+    def get_permissions(self):
+        # Lecture : tout membre GIE (admin exclu)
+        # Création : président ou trésorier uniquement
+        if self.request.method == 'POST':
+            return [EstPresidentOuTresorier()]
+        return [EstMembreGIE()]
 
     def get_queryset(self):
         return SessionCotisation.objects.filter(
@@ -47,7 +57,9 @@ class SessionCotisationCreateView(generics.ListCreateAPIView):
 
 
 class CotisationListView(generics.ListAPIView):
+
     serializer_class = CotisationSerializer
+    permission_classes = [EstMembreGIE]
 
     def get_queryset(self):
         session_id = self.kwargs['session_id']
@@ -55,15 +67,28 @@ class CotisationListView(generics.ListAPIView):
         return Cotisation.objects.filter(
             session_id=session_id
         )
-
+class CotisationDetailView(RetrieveAPIView):
+    queryset = Cotisation.objects.all()
+    serializer_class = CotisationSerializer
 
 class CotisationPaiementView(generics.GenericAPIView):
 
     serializer_class = CotisationPaiementSerializer
+    permission_classes = [EstMembreGIE]
 
     def post(self, request, pk):
 
         cotisation = Cotisation.objects.get(pk=pk)
+
+        # Vérification : seul le membre concerné ou le trésorier peut payer
+        est_tresorier = request.user.role == 'tresorier'
+        est_membre_concerne = request.user == cotisation.membre
+
+        if not est_membre_concerne and not est_tresorier:
+            return Response(
+                {'detail': "Vous n'êtes pas autorisé à effectuer ce paiement."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         if cotisation.statut == 'paye':
             return Response(
@@ -111,6 +136,11 @@ class CotisationPaiementView(generics.GenericAPIView):
                 reference=reference,
                 nom_client=f"{membre.prenom} {membre.nom}",
                 telephone_client=membre.telephone or '',
+                return_url=(
+                    f"{_RETURN_URL}"
+                    f"?type=cotisation"
+                    f"&id={cotisation.id}"
+                ),
             )
         except PayDunyaNetworkError as exc:
             return Response(

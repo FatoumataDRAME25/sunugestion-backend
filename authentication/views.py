@@ -7,7 +7,7 @@ from drf_spectacular.utils import extend_schema
 
 from rest_framework.views import APIView
 from rest_framework.generics import RetrieveUpdateAPIView
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -106,7 +106,7 @@ class StatistiquesGIEView(APIView):
         ).distinct().count()
 
         total_secteurs = GIE.objects.values(
-            'secteur'
+            'type_gie'
         ).distinct().count()
 
         total_membres = Utilisateur.objects.filter(
@@ -214,7 +214,6 @@ class ConnexionView(APIView):
                     'gie': utilisateur.gie.nom if utilisateur.gie else None
                 }
             }, status=status.HTTP_200_OK)
-
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
@@ -246,9 +245,118 @@ class DeconnexionView(APIView):
         )
 
 
+from authentication.permissions import EstAdministrateur
+
+# ──────────────────────────────────────────────────────
+# PROFIL ADMIN
+# GET  /api/auth/profil/  → lire son profil
+# PATCH /api/auth/profil/ → modifier prenom, nom, telephone, email
+# ──────────────────────────────────────────────────────
+
+class ProfilAdminSerializer(serializers.Serializer):
+    prenom    = serializers.CharField(required=False)
+    nom       = serializers.CharField(required=False)
+    telephone = serializers.CharField(required=False)
+    email     = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate_telephone(self, valeur):
+        utilisateur = self.context['request'].user
+        if Utilisateur.objects.filter(telephone=valeur).exclude(id=utilisateur.id).exists():
+            raise serializers.ValidationError("Ce numéro est déjà utilisé.")
+        return valeur
+
+    def validate_email(self, valeur):
+        if not valeur:
+            return valeur
+        utilisateur = self.context['request'].user
+        if Utilisateur.objects.filter(email=valeur).exclude(id=utilisateur.id).exists():
+            raise serializers.ValidationError("Cet email est déjà utilisé.")
+        return valeur.strip().lower()
+
+
+class ProfilAdminView(APIView):
+    permission_classes = [EstAdministrateur]
+
+    def get(self, request):
+        u = request.user
+        return Response({
+            'id':        u.id,
+            'prenom':    u.prenom,
+            'nom':       u.nom,
+            'telephone': u.telephone,
+            'email':     u.email or '',
+            'role':      u.role,
+        })
+
+    def patch(self, request):
+        serializer = ProfilAdminSerializer(
+            data=request.data,
+            partial=True,
+            context={'request': request}
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        u = request.user
+        for champ, valeur in serializer.validated_data.items():
+            setattr(u, champ, valeur)
+        u.save(update_fields=list(serializer.validated_data.keys()))
+
+        return Response({
+            'id':        u.id,
+            'prenom':    u.prenom,
+            'nom':       u.nom,
+            'telephone': u.telephone,
+            'email':     u.email or '',
+            'role':      u.role,
+        })
+
+
+# ──────────────────────────────────────────────────────
+# CHANGER PIN ADMIN
+# POST /api/auth/changer-pin/
+# ──────────────────────────────────────────────────────
+
+class ChangerPinAdminView(APIView):
+    permission_classes = [EstAdministrateur]
+
+    def post(self, request):
+        pin_actuel      = request.data.get('pinActuel', '')
+        nouveau_pin     = request.data.get('nouveauPin', '')
+        confirmation    = request.data.get('confirmationPin', '')
+
+        if not pin_actuel or not nouveau_pin or not confirmation:
+            return Response(
+                {'erreur': "Tous les champs sont obligatoires."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not str(nouveau_pin).isdigit() or len(str(nouveau_pin)) != 4:
+            return Response(
+                {'erreur': "Le nouveau PIN doit être un nombre de 4 chiffres."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if str(nouveau_pin) != str(confirmation):
+            return Response(
+                {'erreur': "Le nouveau PIN et la confirmation ne correspondent pas."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not request.user.check_password(str(pin_actuel)):
+            return Response(
+                {'erreur': "Le PIN actuel est incorrect."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        request.user.set_password(str(nouveau_pin))
+        request.user.save(update_fields=['password'])
+
+        return Response({'message': "PIN modifié avec succès."})
+
+
 class EvolutionGIEView(APIView):
     permission_classes = [AllowAny]
-
 
     def get(self, request):
 
@@ -305,7 +413,7 @@ class RepartitionSecteursView(APIView):
 
         # Nombre de GIE par secteur
         gies_par_secteur = GIE.objects.values(
-            'secteur'
+            'type_gie'
         ).annotate(
             total=Count('id')
         )
@@ -322,7 +430,7 @@ class RepartitionSecteursView(APIView):
             pourcentage = (item['total'] / total_gies) * 100
 
             resultats.append({
-                'secteur': item['secteur'],
+                'type_gie': item['type_gie'],
                 'pourcentage': round(pourcentage, 2)
             })
 

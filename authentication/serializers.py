@@ -45,7 +45,7 @@ class GIESerializer(serializers.ModelSerializer):
             'id',
             'nom',
             'region',
-            'secteur',
+            'type_gie',
             'telephone',
             'photo',
             'code',

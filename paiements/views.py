@@ -7,6 +7,12 @@ Distingue trois types d'opérations :
 - PAY-IN  cotisation          : COTISATION-<id>
 - PAY-IN  remboursement prêt  : PRET-REMBOURSEMENT-<id>
 - PAY-OUT décaissement prêt   : DECAISSEMENT-PRET-<id>  (via token_decaissement_paydunya)
+
+Note sur le format reçu :
+PayDunya envoie le callback en application/x-www-form-urlencoded, avec des clés
+"à plat" utilisant la notation à crochets (ex. "data[invoice][token]"), et NON
+en JSON imbriqué classique. request.data est donc un QueryDict dont les clés
+littérales contiennent des crochets — il faut les lire telles quelles.
 """
 
 import logging
@@ -59,10 +65,19 @@ def paydunya_callback(request):
     Ne fait jamais confiance au seul callback — vérifie toujours auprès de PayDunya.
     """
     data = request.data
-    invoice_token = data.get('token') or data.get('invoice_token')
+
+    # ─── Extraction du token ───────────────────────────────────────────────
+    # PayDunya envoie le callback en formulaire encodé, avec des clés à
+    # crochets littéraux : "data[invoice][token]". On garde aussi les
+    # variantes JSON simples en repli, au cas où le format changerait.
+    invoice_token = (
+        data.get('data[invoice][token]')
+        or data.get('token')
+        or data.get('invoice_token')
+    )
 
     if not invoice_token:
-        logger.warning("Callback PayDunya reçu sans token.")
+        logger.warning("Callback PayDunya reçu sans token. Corps reçu : %s", data)
         return Response({'detail': 'Token manquant.'}, status=400)
 
     logger.info("Callback PayDunya reçu | token=%s...", invoice_token[:8])

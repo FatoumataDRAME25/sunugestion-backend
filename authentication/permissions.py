@@ -74,3 +74,18 @@ class EstPresidentOuTresorier(BasePermission):
             and request.user.role in ('president', 'tresorier')
             and request.user.gie is not None
         )
+
+
+class EstTresorier(BasePermission):
+    """
+    Autorise uniquement le trésorier d'un GIE.
+    """
+    message = "Accès réservé au trésorier."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == 'tresorier'
+            and request.user.gie is not None
+        )

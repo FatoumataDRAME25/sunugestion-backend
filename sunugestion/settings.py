@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'activites',
     'notifications',
     'paiements',
+    'gie',
 ]
 
 # Modèle utilisateur personnalisé
@@ -229,6 +230,9 @@ PAYDUNYA_PRIVATE_KEY = config('PAYDUNYA_PRIVATE_KEY')
 PAYDUNYA_PUBLIC_KEY  = config('PAYDUNYA_PUBLIC_KEY')
 PAYDUNYA_TOKEN       = config('PAYDUNYA_TOKEN')
 PAYDUNYA_CALLBACK_URL = config('PAYDUNYA_CALLBACK_URL', default='')
+PAYDUNYA_RETURN_URL = config('PAYDUNYA_RETURN_URL', default='')
+PAYDUNYA_CANCEL_URL = config('PAYDUNYA_CANCEL_URL', default='')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:4200')
 
 # Firebase Admin SDK
 # Chemin absolu construit depuis BASE_DIR pour fonctionner aussi bien avec

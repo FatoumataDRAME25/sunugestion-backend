@@ -6,9 +6,11 @@ from rest_framework.response import Response
 from historiques.models import HistoriqueOperation
 from historiques.serializers import (
     HistoriqueOperationSerializer,
+    HistoriqueOperationDetailSerializer,
     OperationCreateSerializer,
     SoldeSerializer
 )
+from authentication.permissions import EstMembreGIE, EstTresorier
 
 
 def calculer_solde(gie):
@@ -35,10 +37,23 @@ def calculer_solde(gie):
 class HistoriqueOperationListView(generics.ListAPIView):
 
     serializer_class = HistoriqueOperationSerializer
+    permission_classes = [EstMembreGIE]
 
     def get_queryset(self):
-
         return HistoriqueOperation.objects.filter(
+            gie=self.request.user.gie
+        )
+
+
+class HistoriqueOperationDetailView(generics.RetrieveAPIView):
+
+    serializer_class = HistoriqueOperationDetailSerializer
+    permission_classes = [EstMembreGIE]
+
+    def get_object(self):
+        return generics.get_object_or_404(
+            HistoriqueOperation,
+            id=self.kwargs['pk'],
             gie=self.request.user.gie
         )
 
@@ -46,6 +61,7 @@ class HistoriqueOperationListView(generics.ListAPIView):
 class SoldeView(generics.GenericAPIView):
 
     serializer_class = SoldeSerializer
+    permission_classes = [EstMembreGIE]
 
     def get(self, request):
 
@@ -67,6 +83,7 @@ class SoldeView(generics.GenericAPIView):
 class OperationCreateView(generics.CreateAPIView):
 
     serializer_class = OperationCreateSerializer
+    permission_classes = [EstTresorier]
 
     def perform_create(self, serializer):
 

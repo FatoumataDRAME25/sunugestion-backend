@@ -1,4 +1,5 @@
 from django.utils import timezone
+from rest_framework.permissions import IsAuthenticated
 from datetime import date
 import calendar
 from django.shortcuts import get_object_or_404
@@ -6,18 +7,19 @@ from django.db.models import Q
 from django.contrib.auth import get_user_model
 from rest_framework.response import Response
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from historiques.views import calculer_solde
 from historiques.models import HistoriqueOperation
 from notifications.service import envoyer_notification
+from authentication.permissions import EstMembreGIE, EstPresident, EstPresidentOuTresorier, EstTresorier
 from paiements.paydunya_service import (
     creer_facture,
     initier_decaissement,
     soumettre_decaissement,
     PayDunyaError,
     PayDunyaNetworkError,
+    _RETURN_URL,
 )
 
 from .models import ReglePret, Pret
@@ -68,7 +70,13 @@ def ajouter_mois(date_depart, nombre_mois):
 
 class ReglePretView(generics.GenericAPIView):
     serializer_class = ReglePretSerializer
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # Lecture : tout membre GIE (admin exclu)
+        # Création / modification : président uniquement
+        if self.request.method in ('POST', 'PATCH'):
+            return [EstPresident()]
+        return [EstMembreGIE()]
 
     def get(self, request):
         try:
@@ -134,7 +142,7 @@ class ReglePretView(generics.GenericAPIView):
 class PretView(generics.GenericAPIView):
 
     serializer_class = PretSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [EstMembreGIE]
 
     def post(self, request):
 
@@ -297,7 +305,7 @@ class PretView(generics.GenericAPIView):
 class PretApprobationView(generics.GenericAPIView):
 
     serializer_class = PretApprobationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [EstPresident]
 
     def post(self, request, pk):
 
@@ -412,7 +420,7 @@ class PretApprobationView(generics.GenericAPIView):
 class PretDecaissementView(generics.GenericAPIView):
 
     serializer_class = PretDecaissementSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [EstTresorier]
 
     def post(self, request, pk):
 
@@ -538,7 +546,7 @@ class PretDecaissementView(generics.GenericAPIView):
 class PretRemboursementView(generics.GenericAPIView):
 
     serializer_class = PretRemboursementSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [EstMembreGIE]
 
     def post(self, request, pk):
 
@@ -550,6 +558,16 @@ class PretRemboursementView(generics.GenericAPIView):
         if pret.statut != 'en_cours':
             raise ValidationError(
                 {'pret': 'Seul un prêt en cours peut être remboursé.'}
+            )
+
+        # Vérification : seul le membre concerné ou le trésorier peut rembourser
+        est_tresorier = request.user.role == 'tresorier'
+        est_membre_concerne = request.user == pret.membre
+
+        if not est_membre_concerne and not est_tresorier:
+            return Response(
+                {'detail': "Vous n'êtes pas autorisé à effectuer ce remboursement."},
+                status=403
             )
 
         serializer = self.get_serializer(data=request.data, context={
@@ -586,6 +604,11 @@ class PretRemboursementView(generics.GenericAPIView):
                 reference=reference,
                 nom_client=f"{membre.prenom} {membre.nom}",
                 telephone_client=membre.telephone or '',
+                return_url=(
+                    f"{_RETURN_URL}"
+                    f"?type=pret"
+                    f"&id={pret.id}"
+                ),
             )
         except PayDunyaNetworkError as exc:
             return Response(

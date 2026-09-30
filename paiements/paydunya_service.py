@@ -27,13 +27,17 @@ logger = logging.getLogger(__name__)
 
 PAYDUNYA_MODE = config("PAYDUNYA_MODE", default="test")
 
-
 # URLs de l'API PayDunya selon le mode
 _BASE_URLS = {
     "test": "https://app.paydunya.com/sandbox-api/v1",
     "live": "https://app.paydunya.com/api/v1",
 }
 
+# URLs des pages de paiement (checkout) : domaine paydunya.com, SANS "app."
+_CHECKOUT_URLS = {
+    "test": "https://paydunya.com/sandbox-checkout/invoice",
+    "live": "https://paydunya.com/checkout/invoice",
+}
 
 # En-têtes d'authentification PayDunya
 _HEADERS = {
@@ -44,13 +48,21 @@ _HEADERS = {
     "Content-Type": "application/json",
 }
 
-
-# URL de callback appelée par PayDunya après paiement
+# URL de callback appelée par PayDunya après paiement (HTTPS publique)
 _CALLBACK_URL = config("PAYDUNYA_CALLBACK_URL", default="")
-
+_RETURN_URL = config("PAYDUNYA_RETURN_URL", default="")
+_CANCEL_URL = config("PAYDUNYA_CANCEL_URL", default="")
 
 # Timeout pour les appels HTTP vers PayDunya
 _TIMEOUT = 30
+
+
+def _base_url() -> str:
+    return _BASE_URLS.get(PAYDUNYA_MODE, _BASE_URLS["test"])
+
+
+def _checkout_url() -> str:
+    return _CHECKOUT_URLS.get(PAYDUNYA_MODE, _CHECKOUT_URLS["test"])
 
 
 # ─── Exceptions métier ────────────────────────────────────────────────────────
@@ -65,6 +77,87 @@ class PayDunyaNetworkError(Exception):
     pass
 
 
+# ─── Helper HTTP commun ───────────────────────────────────────────────────────
+
+def _requete(
+    methode: str,
+    endpoint: str,
+    contexte: str,
+    payload: dict | None = None,
+) -> dict:
+    """
+    Effectue un appel HTTP vers PayDunya, gère les erreurs réseau/HTTP/JSON
+    et vérifie que response_code == "00". Retourne le JSON parsé.
+    """
+
+    try:
+        if methode == "POST":
+            response = httpx.post(
+                endpoint,
+                json=payload,
+                headers=_HEADERS,
+                timeout=_TIMEOUT,
+            )
+        else:
+            response = httpx.get(
+                endpoint,
+                headers=_HEADERS,
+                timeout=_TIMEOUT,
+            )
+
+        response.raise_for_status()
+
+    except httpx.TimeoutException as exc:
+        logger.error("PayDunya — timeout (%s) : %s", contexte, exc)
+        raise PayDunyaNetworkError(
+            "Le service de paiement ne répond pas. Veuillez réessayer."
+        ) from exc
+
+    except httpx.NetworkError as exc:
+        logger.error("PayDunya — erreur réseau (%s) : %s", contexte, exc)
+        raise PayDunyaNetworkError(
+            "Impossible de joindre le service de paiement."
+        ) from exc
+
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "PayDunya — erreur HTTP %s (%s) : %s",
+            exc.response.status_code,
+            contexte,
+            exc.response.text,
+        )
+        raise PayDunyaError(
+            f"Le service de paiement a retourné une erreur "
+            f"({exc.response.status_code})."
+        ) from exc
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        logger.error(
+            "PayDunya — réponse non JSON (%s) : %s",
+            contexte,
+            response.text,
+        )
+        raise PayDunyaError(
+            "Réponse inattendue du service de paiement."
+        ) from exc
+
+    response_code = data.get("response_code", "")
+
+    if response_code != "00":
+        message_erreur = data.get("response_text", "Erreur inconnue PayDunya.")
+        logger.error(
+            "PayDunya — échec (%s) | code=%s | message=%s",
+            contexte,
+            response_code,
+            message_erreur,
+        )
+        raise PayDunyaError(message_erreur)
+
+    return data
+
+
 # ─── Pay-in : création d'une facture ─────────────────────────────────────────
 
 def creer_facture(
@@ -74,25 +167,21 @@ def creer_facture(
     nom_client: str = "",
     email_client: str = "",
     telephone_client: str = "",
+    return_url: str  = "",
+    cancel_url: str ="",
 ) -> dict:
     """
     Crée une facture PayDunya et retourne le token et l'URL de paiement.
 
     Retourne :
-
     {
         "token": "le_token_paydunya",
-        "url_paiement": "https://app.paydunya.com/...",
+        "url_paiement": "https://paydunya.com/...",
         "response_code": "00",
     }
     """
 
-    base_url = _BASE_URLS.get(
-        PAYDUNYA_MODE,
-        _BASE_URLS["test"]
-    )
-
-    endpoint = f"{base_url}/checkout-invoice/create"
+    endpoint = f"{_base_url()}/checkout-invoice/create"
 
     payload = {
         "invoice": {
@@ -107,21 +196,21 @@ def creer_facture(
         },
         "actions": {
             "callback_url": _CALLBACK_URL,
+            "return_url": return_url or _RETURN_URL,
+            "cancel_url": cancel_url or _CANCEL_URL,
         },
     }
 
-    # Ajouter les informations du client si disponibles
-    if nom_client or email_client or telephone_client:
-        payload["customer"] = {}
-
-        if nom_client:
-            payload["customer"]["name"] = nom_client
-
-        if email_client:
-            payload["customer"]["email"] = email_client
-
-        if telephone_client:
-            payload["customer"]["phone"] = telephone_client
+    # Informations du client si disponibles
+    customer = {}
+    if nom_client:
+        customer["name"] = nom_client
+    if email_client:
+        customer["email"] = email_client
+    if telephone_client:
+        customer["phone"] = telephone_client
+    if customer:
+        payload["customer"] = customer
 
     logger.info(
         "PayDunya — création facture | mode=%s | montant=%s | ref=%s",
@@ -130,120 +219,33 @@ def creer_facture(
         reference,
     )
 
-    try:
-        response = httpx.post(
-            endpoint,
-            json=payload,
-            headers=_HEADERS,
-            timeout=_TIMEOUT,
-        )
-
-        response.raise_for_status()
-
-    except httpx.TimeoutException as exc:
-        logger.error(
-            "PayDunya — timeout lors de la création de facture : %s",
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Le service de paiement ne répond pas. Veuillez réessayer."
-        ) from exc
-
-    except httpx.NetworkError as exc:
-        logger.error(
-            "PayDunya — erreur réseau : %s",
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Impossible de joindre le service de paiement."
-        ) from exc
-
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "PayDunya — erreur HTTP %s : %s",
-            exc.response.status_code,
-            exc.response.text,
-        )
-
-        raise PayDunyaError(
-            f"Le service de paiement a retourné une erreur "
-            f"({exc.response.status_code})."
-        ) from exc
-
-    # Analyser la réponse JSON
-    try:
-        data = response.json()
-
-    except Exception as exc:
-        logger.error(
-            "PayDunya — réponse non JSON : %s",
-            response.text,
-        )
-
-        raise PayDunyaError(
-            "Réponse inattendue du service de paiement."
-        ) from exc
-
-    # PayDunya retourne response_code="00" en cas de succès
-    response_code = data.get("response_code", "")
-
-    if response_code != "00":
-        message_erreur = data.get(
-            "response_text",
-            "Erreur inconnue PayDunya.",
-        )
-
-        logger.error(
-            "PayDunya — échec création facture | code=%s | message=%s",
-            response_code,
-            message_erreur,
-        )
-
-        raise PayDunyaError(message_erreur)
+    data = _requete("POST", endpoint, "création facture", payload)
 
     token = data.get("token")
 
     if not token:
-        logger.error(
-            "PayDunya — token absent dans la réponse : %s",
-            data,
-        )
+        logger.error("PayDunya — token absent dans la réponse : %s", data)
+        raise PayDunyaError("Token de paiement absent dans la réponse PayDunya.")
 
-        raise PayDunyaError(
-            "Token de paiement absent dans la réponse PayDunya."
-        )
+    # ─── URL de paiement ─────────────────────────────────────────────────────
+    # PayDunya renvoie l'URL de checkout dans response_text.
+    # Fallback : on la reconstruit sur paydunya.com (sans "app.").
+    url_paiement = data.get("response_text", "")
 
-    # ─── Construction de l'URL de paiement ───────────────────────────────────
-    #
-    # Sandbox :
-    # https://app.paydunya.com/sandbox-checkout/invoice/{token}
-    #
-    # Production :
-    # https://app.paydunya.com/checkout/invoice/{token}
-
-    if PAYDUNYA_MODE == "test":
-        url_paiement = (
-            f"https://app.paydunya.com/"
-            f"sandbox-checkout/invoice/{token}"
-        )
-    else:
-        url_paiement = (
-            f"https://app.paydunya.com/"
-            f"checkout/invoice/{token}"
-        )
+    if not str(url_paiement).startswith("http"):
+        url_paiement = f"{_checkout_url()}/{token}"
 
     logger.info(
-        "PayDunya — facture créée | token=%s... | ref=%s",
+        "PayDunya — facture créée | token=%s... | ref=%s | url=%s",
         token[:8],
         reference,
+        url_paiement,
     )
 
     return {
         "token": token,
         "url_paiement": url_paiement,
-        "response_code": response_code,
+        "response_code": data.get("response_code", ""),
     }
 
 
@@ -254,7 +256,6 @@ def verifier_facture(invoice_token: str) -> dict:
     Vérifie le statut d'une facture PayDunya.
 
     Retourne :
-
     {
         "statut": "completed" | "pending" | "failed" | "cancelled",
         "montant_confirme": 5000,
@@ -263,15 +264,7 @@ def verifier_facture(invoice_token: str) -> dict:
     }
     """
 
-    base_url = _BASE_URLS.get(
-        PAYDUNYA_MODE,
-        _BASE_URLS["test"]
-    )
-
-    endpoint = (
-        f"{base_url}/checkout-invoice/confirm/"
-        f"{invoice_token}"
-    )
+    endpoint = f"{_base_url()}/checkout-invoice/confirm/{invoice_token}"
 
     logger.info(
         "PayDunya — vérification facture | mode=%s | token=%s...",
@@ -279,91 +272,22 @@ def verifier_facture(invoice_token: str) -> dict:
         invoice_token[:8],
     )
 
-    try:
-        response = httpx.get(
-            endpoint,
-            headers=_HEADERS,
-            timeout=_TIMEOUT,
-        )
+    data = _requete("GET", endpoint, "vérification facture")
 
-        response.raise_for_status()
+    invoice_data = data.get("invoice", {}) or {}
 
-    except httpx.TimeoutException as exc:
-        logger.error(
-            "PayDunya — timeout lors de la vérification : %s",
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Le service de paiement ne répond pas. Veuillez réessayer."
-        ) from exc
-
-    except httpx.NetworkError as exc:
-        logger.error(
-            "PayDunya — erreur réseau lors de la vérification : %s",
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Impossible de joindre le service de paiement."
-        ) from exc
-
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "PayDunya — erreur HTTP %s lors de la vérification : %s",
-            exc.response.status_code,
-            exc.response.text,
-        )
-
-        raise PayDunyaError(
-            f"Le service de paiement a retourné une erreur "
-            f"({exc.response.status_code})."
-        ) from exc
-
-    try:
-        data = response.json()
-
-    except Exception as exc:
-        logger.error(
-            "PayDunya — réponse non JSON lors de la vérification : %s",
-            response.text,
-        )
-
-        raise PayDunyaError(
-            "Réponse inattendue du service de paiement."
-        ) from exc
-
-    response_code = data.get("response_code", "")
-    response_text = data.get("response_text", "")
-
-    # Le statut se trouve dans invoice.status
-    invoice_data = data.get("invoice", {})
-
-    statut_brut = invoice_data.get(
-        "status",
-        ""
+    # CORRECTION : le statut est au premier niveau de la réponse
+    # (data["status"]), avec repli sur invoice.status.
+    statut_brut = str(
+        data.get("status") or invoice_data.get("status") or ""
     ).lower()
 
-    # Normalisation du statut
-    STATUTS_VALIDES = {
-        "completed",
-        "pending",
-        "failed",
-        "cancelled",
-    }
-
-    statut = (
-        statut_brut
-        if statut_brut in STATUTS_VALIDES
-        else "failed"
-    )
+    statuts_valides = {"completed", "pending", "failed", "cancelled"}
+    statut = statut_brut if statut_brut in statuts_valides else "failed"
 
     # Montant confirmé par PayDunya
     try:
-        montant_confirme = int(
-            invoice_data.get("total_amount", 0)
-        )
-
+        montant_confirme = int(float(invoice_data.get("total_amount", 0)))
     except (TypeError, ValueError):
         montant_confirme = 0
 
@@ -377,23 +301,22 @@ def verifier_facture(invoice_token: str) -> dict:
     return {
         "statut": statut,
         "montant_confirme": montant_confirme,
-        "response_code": response_code,
-        "response_text": response_text,
+        "response_code": data.get("response_code", ""),
+        "response_text": data.get("response_text", ""),
     }
 
 
-# ─── Pay-out : correspondance des modes ──────────────────────────────────────
+# ─── Pay-out : configuration ─────────────────────────────────────────────────
 
 _MODES_PAYOUT = {
     "wave": "wave-senegal",
     "orange_money": "orange-money-senegal",
 }
 
-
-# URL de base de l'API Pay-out PayDunya
-_PAYOUT_BASE_URL = (
-    "https://app.paydunya.com/api/v2/disburse"
-)
+# ATTENTION : l'API Pay-out n'a pas de sandbox dédié. Même avec
+# PAYDUNYA_MODE=test, ces appels visent l'API réelle : vérifie la
+# documentation PayDunya avant de tester des décaissements.
+_PAYOUT_BASE_URL = "https://app.paydunya.com/api/v2/disburse"
 
 
 # ─── Pay-out : initier un décaissement ───────────────────────────────────────
@@ -406,12 +329,8 @@ def initier_decaissement(
 ) -> dict:
     """
     Étape 1 du Pay-out PayDunya.
-
-    Appelle :
-    POST /api/v2/disburse/get-invoice
+    Appelle : POST /api/v2/disburse/get-invoice
     """
-
-    endpoint = f"{_PAYOUT_BASE_URL}/get-invoice"
 
     withdraw_mode = _MODES_PAYOUT.get(mode_paiement)
 
@@ -438,10 +357,11 @@ def initier_decaissement(
         reference,
     )
 
-    return _appel_payout(
-        endpoint,
-        payload,
+    return _requete(
+        "POST",
+        f"{_PAYOUT_BASE_URL}/get-invoice",
         "initiation décaissement",
+        payload,
     )
 
 
@@ -453,12 +373,8 @@ def soumettre_decaissement(
 ) -> dict:
     """
     Étape 2 du Pay-out PayDunya.
-
-    Appelle :
-    POST /api/v2/disburse/submit-invoice
+    Appelle : POST /api/v2/disburse/submit-invoice
     """
-
-    endpoint = f"{_PAYOUT_BASE_URL}/submit-invoice"
 
     payload = {
         "disburse_invoice": disburse_token,
@@ -471,67 +387,45 @@ def soumettre_decaissement(
         disburse_id,
     )
 
-    return _appel_payout(
-        endpoint,
-        payload,
+    return _requete(
+        "POST",
+        f"{_PAYOUT_BASE_URL}/submit-invoice",
         "soumission décaissement",
+        payload,
     )
 
 
 # ─── Pay-out : vérifier un décaissement ───────────────────────────────────────
 
-def verifier_decaissement(
-    disburse_token: str,
-) -> dict:
+def verifier_decaissement(disburse_token: str) -> dict:
     """
     Vérifie le statut d'un décaissement PayDunya.
-
-    Appelle :
-    POST /api/v2/disburse/check-status
+    Appelle : POST /api/v2/disburse/check-status
 
     Seul "success" permet de considérer le décaissement comme réussi.
     """
 
-    endpoint = f"{_PAYOUT_BASE_URL}/check-status"
-
-    payload = {
-        "disburse_invoice": disburse_token,
-    }
+    payload = {"disburse_invoice": disburse_token}
 
     logger.info(
         "PayDunya Pay-out — vérification statut | token=%s...",
         disburse_token[:8],
     )
 
-    data = _appel_payout(
-        endpoint,
-        payload,
+    data = _requete(
+        "POST",
+        f"{_PAYOUT_BASE_URL}/check-status",
         "vérification décaissement",
+        payload,
     )
 
-    statut_brut = data.get(
-        "status",
-        ""
-    ).lower()
+    statut_brut = str(data.get("status", "")).lower()
 
-    STATUTS_VALIDES = {
-        "created",
-        "pending",
-        "success",
-        "failed",
-    }
-
-    statut = (
-        statut_brut
-        if statut_brut in STATUTS_VALIDES
-        else "failed"
-    )
+    statuts_valides = {"created", "pending", "success", "failed"}
+    statut = statut_brut if statut_brut in statuts_valides else "failed"
 
     try:
-        montant_confirme = int(
-            data.get("amount", 0)
-        )
-
+        montant_confirme = int(float(data.get("amount", 0)))
     except (TypeError, ValueError):
         montant_confirme = 0
 
@@ -545,106 +439,12 @@ def verifier_decaissement(
     return {
         "statut": statut,
         "montant_confirme": montant_confirme,
-        "response_code": data.get(
-            "response_code",
-            "",
-        ),
-        "response_text": data.get(
-            "response_text",
-            "",
-        ),
+        "response_code": data.get("response_code", ""),
+        "response_text": data.get("response_text", ""),
     }
 
+from urllib.parse import urlencode
 
-# ─── Helper Pay-out ───────────────────────────────────────────────────────────
-
-def _appel_payout(
-    endpoint: str,
-    payload: dict,
-    contexte: str,
-) -> dict:
-    """
-    Effectue un appel POST vers l'API Pay-out PayDunya
-    et retourne la réponse JSON parsée.
-    """
-
-    try:
-        response = httpx.post(
-            endpoint,
-            json=payload,
-            headers=_HEADERS,
-            timeout=_TIMEOUT,
-        )
-
-        response.raise_for_status()
-
-    except httpx.TimeoutException as exc:
-        logger.error(
-            "PayDunya Pay-out — timeout (%s) : %s",
-            contexte,
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Le service de paiement ne répond pas. Veuillez réessayer."
-        ) from exc
-
-    except httpx.NetworkError as exc:
-        logger.error(
-            "PayDunya Pay-out — erreur réseau (%s) : %s",
-            contexte,
-            exc,
-        )
-
-        raise PayDunyaNetworkError(
-            "Impossible de joindre le service de paiement."
-        ) from exc
-
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "PayDunya Pay-out — erreur HTTP %s (%s) : %s",
-            exc.response.status_code,
-            contexte,
-            exc.response.text,
-        )
-
-        raise PayDunyaError(
-            f"Le service de paiement a retourné une erreur "
-            f"({exc.response.status_code})."
-        ) from exc
-
-    try:
-        data = response.json()
-
-    except Exception as exc:
-        logger.error(
-            "PayDunya Pay-out — réponse non JSON (%s) : %s",
-            contexte,
-            response.text,
-        )
-
-        raise PayDunyaError(
-            "Réponse inattendue du service de paiement."
-        ) from exc
-
-    response_code = data.get(
-        "response_code",
-        "",
-    )
-
-    if response_code != "00":
-        message_erreur = data.get(
-            "response_text",
-            "Erreur inconnue PayDunya.",
-        )
-
-        logger.error(
-            "PayDunya Pay-out — échec (%s) | code=%s | message=%s",
-            contexte,
-            response_code,
-            message_erreur,
-        )
-
-        raise PayDunyaError(message_erreur)
-
-    return data
+def construire_url_retour(type_paiement: str, objet_id: int) -> str:
+    sep = "&" if "?" in _RETURN_URL else "?"
+    return f"{_RETURN_URL}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"

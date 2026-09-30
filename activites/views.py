@@ -1,13 +1,13 @@
 from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 
 from django.contrib.auth import get_user_model
 
 from .models import Activite, Presence
 from .serializers import ActiviteSerializer, EnregistrerPresenceSerializer
 from notifications.service import envoyer_notification
+from authentication.permissions import EstMembreGIE, EstPresidentOuSecretaire
 
 Utilisateur = get_user_model()
 
@@ -23,7 +23,13 @@ def _membres_actifs_sauf(gie, exclu_id):
 class ActiviteViewSet(viewsets.ModelViewSet):
 
     serializer_class = ActiviteSerializer
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # Lecture seule : tout membre GIE (admin exclu)
+        if self.action in ('list', 'retrieve', 'membres'):
+            return [EstMembreGIE()]
+        # Écriture et actions : président ou secrétaire uniquement
+        return [EstPresidentOuSecretaire()]
 
     def get_queryset(self):
         return Activite.objects.filter(

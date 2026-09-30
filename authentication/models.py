@@ -11,12 +11,10 @@ class GIE(models.Model):
         ('en_attente', 'En attente')
     ]
 
-    SECTEUR_CHOICES = [
-        ('agriculture', 'Agriculture'),
-        ('commerce', 'Commerce'),
-        ('peche', 'Pêche'),
-        ('artisanat', 'Artisanat'),
-        ('services', 'Services'),
+    type_CHOICES = [
+        ('association', 'Association'),
+        ('organisation_communautaire', 'Organisation communautaire'),
+        ('groupement', 'Groupement'),
         ('autre', 'Autre'),
     ]
 
@@ -28,7 +26,7 @@ class GIE(models.Model):
     )
     nom = models.CharField(max_length=255)
     region = models.CharField(max_length=100)
-    secteur = models.CharField(max_length=50, choices=SECTEUR_CHOICES)
+    type_gie = models.CharField(max_length=50, choices=type_CHOICES)
     telephone = models.CharField(max_length=20, null=True, blank=True) 
     photo = models.ImageField(upload_to='gie/photos/', null=True, blank=True)
     code = models.CharField(max_length=50, unique=True)
@@ -78,6 +76,7 @@ class UtilisateurManager(BaseUserManager):
         )
         utilisateur.is_staff = True
         utilisateur.is_superuser = True
+        utilisateur.statut = 'actif'
         utilisateur.save(using=self._db)
         return utilisateur
 
