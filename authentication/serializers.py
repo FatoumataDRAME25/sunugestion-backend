@@ -1,5 +1,6 @@
 from rest_framework_simplejwt.exceptions import TokenError
-
+from django.core.mail import send_mail
+from django.conf import settings
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -14,7 +15,8 @@ class GIECreationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GIE
-        fields = ['nom', 'region', 'secteur', 'telephone', 'photo']
+        fields = ['id','nom', 'region', 'type_gie', 'telephone', 'photo']
+        
 
     def validate_nom(self, valeur):
         if not valeur.strip():
@@ -36,6 +38,28 @@ class GIECreationSerializer(serializers.ModelSerializer):
         return gie
 
 
+class GIESerializer(serializers.ModelSerializer):
+    nombre_membres = serializers.SerializerMethodField()
+    class Meta:
+        model = GIE
+        fields = [
+            'id',
+            'nom',
+            'region',
+            'type_gie',
+            'telephone',
+            'photo',
+            'code',
+            'date_creation',
+            'statut',
+            'nombre_membres'
+        ]
+        read_only_fields = ['id', 'code', 'date_creation']
+
+    def get_nombre_membres(self, gie):
+        return gie.membres.count()
+
+
 class InscriptionPresidentSerializer(serializers.ModelSerializer):
     """Étape 2 — Informations personnelles + PIN"""
 
@@ -50,6 +74,7 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         min_length=4,
         write_only=True
     )
+    email = serializers.EmailField(required=True)
 
     class Meta:
         model = Utilisateur
@@ -110,6 +135,7 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
             telephone=validated_data['telephone'],
             nom=validated_data['nom'],
             prenom=validated_data['prenom'],
+            email=validated_data['email'],
             role='president',
             gie=gie,
             password=pin
@@ -118,8 +144,22 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         # Générer et envoyer l'OTP
         otp = president.generer_otp()
 
-        # TODO : envoyer SMS via Africa's Talking
-        print(f"OTP pour {president.telephone} : {otp}")
+        print(">>> DESTINATAIRE EMAIL :", president.email)
+        print(">>> ENVOI DE L'EMAIL OTP...")
+
+        send_mail(
+            subject="Votre code OTP - SunuGestion",
+            message=(
+                f"Bonjour {president.prenom},\n\n"
+                f"Votre code OTP pour activer votre compte SunuGestion est : {otp}\n\n"
+                f"Ce code est valable pendant 10 minutes.\n\n"
+                f"L'équipe SunuGestion"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[president.email],
+        )
+
+        print(">>> EMAIL OTP ENVOYÉ")
 
         return president
 

@@ -34,7 +34,7 @@ SECRET_KEY = 'django-insecure-#z06hmd#@-e9b(meis@yi#xrc2n(($lfwd_6j6+qhx66c9__m#
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -53,7 +53,15 @@ INSTALLED_APPS = [
     'corsheaders',
     'djangorestframework_camel_case',  # permet d'avoir les memes nommanclature des champs des que le frontend
     'authentication',
-    'membres'
+    'membres',
+    'cotisations',
+    'historiques',
+    'prets',
+    'extraction',
+    'activites',
+    'notifications',
+    'paiements',
+    'gie',
 ]
 
 # Modèle utilisateur personnalisé
@@ -115,6 +123,7 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
     "http://127.0.0.1:4200",
+    'https://stitch-freebie-dreamless.ngrok-free.dev'
 ]
 
 ROOT_URLCONF = 'sunugestion.urls'
@@ -183,9 +192,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
 LANGUAGE_CODE = 'fr-FR'
-
+# ca permet de gérer les dates et heures en fonction du fuseau horaire défini dans TIME_ZONE
 TIME_ZONE = 'Africa/Dakar'
 
+# ca permet de gérer les traductions de language et l'internationalisation de l'application
 USE_I18N = True
 
 USE_TZ = True
@@ -206,7 +216,37 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
 MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    "default": {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": "smtp.gmail.com",
+            "port": 587,
+            "username": config("EMAIL_HOST_USER"),
+            "password": config("EMAIL_HOST_PASSWORD"),
+            "use_tls": True,
+        },
     },
 }
+
+DEFAULT_FROM_EMAIL = config("EMAIL_HOST_USER")
+
+API_URL= config('API_URL', default='http://localhost:8000')
+APP_URL = config('APP_URL', default='http://localhost:4200')
+
+# PayDunya
+PAYDUNYA_MODE        = config('PAYDUNYA_MODE', default='test')
+PAYDUNYA_MASTER_KEY  = config('PAYDUNYA_MASTER_KEY')
+PAYDUNYA_PRIVATE_KEY = config('PAYDUNYA_PRIVATE_KEY')
+PAYDUNYA_PUBLIC_KEY  = config('PAYDUNYA_PUBLIC_KEY')
+PAYDUNYA_TOKEN       = config('PAYDUNYA_TOKEN')
+PAYDUNYA_CALLBACK_URL = config('PAYDUNYA_CALLBACK_URL', default='')
+PAYDUNYA_RETURN_URL = config('PAYDUNYA_RETURN_URL', default='')
+PAYDUNYA_CANCEL_URL = config('PAYDUNYA_CANCEL_URL', default='')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:4200')
+
+# Firebase Admin SDK
+# Chemin absolu construit depuis BASE_DIR pour fonctionner aussi bien avec
+# runserver qu'avec CRON (qui ne démarre pas depuis le répertoire du projet).
+FIREBASE_CREDENTIALS_PATH = str(
+    BASE_DIR / 'sunugestion' / 'firebase-credentials.json'
+)

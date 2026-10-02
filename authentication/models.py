@@ -11,12 +11,10 @@ class GIE(models.Model):
         ('en_attente', 'En attente')
     ]
 
-    SECTEUR_CHOICES = [
-        ('agriculture', 'Agriculture'),
-        ('commerce', 'Commerce'),
-        ('peche', 'Pêche'),
-        ('artisanat', 'Artisanat'),
-        ('services', 'Services'),
+    type_CHOICES = [
+        ('association', 'Association'),
+        ('organisation_communautaire', 'Organisation communautaire'),
+        ('groupement', 'Groupement'),
         ('autre', 'Autre'),
     ]
 
@@ -28,7 +26,7 @@ class GIE(models.Model):
     )
     nom = models.CharField(max_length=255)
     region = models.CharField(max_length=100)
-    secteur = models.CharField(max_length=50, choices=SECTEUR_CHOICES)
+    type_gie = models.CharField(max_length=50, choices=type_CHOICES)
     telephone = models.CharField(max_length=20, null=True, blank=True) 
     photo = models.ImageField(upload_to='gie/photos/', null=True, blank=True)
     code = models.CharField(max_length=50, unique=True)
@@ -51,7 +49,7 @@ class GIE(models.Model):
 
 class UtilisateurManager(BaseUserManager):
 
-    def create_user(self, telephone, nom, prenom, role, gie=None, password=None):
+    def create_user(self, telephone, nom, prenom, role, gie=None, password=None, **extra_fields):
         if not telephone:
             raise ValueError("Le numéro de téléphone est obligatoire")
         
@@ -60,7 +58,8 @@ class UtilisateurManager(BaseUserManager):
             nom=nom,
             prenom=prenom,
             role=role,
-            gie=gie
+            gie=gie,
+            **extra_fields
         )
         if password:
             utilisateur.set_password(password)
@@ -77,6 +76,7 @@ class UtilisateurManager(BaseUserManager):
         )
         utilisateur.is_staff = True
         utilisateur.is_superuser = True
+        utilisateur.statut = 'actif'
         utilisateur.save(using=self._db)
         return utilisateur
 
