@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from .models import Activite, Presence
 
@@ -32,6 +33,16 @@ class ActiviteSerializer(serializers.ModelSerializer):
             'date_creation',
             'statut',
         ]
+
+    def validate_date_activite(self, valeur):
+        # Uniquement à la création ou modification — pas lors des actions demarrer/terminer
+        # qui n'envoient pas date_activite
+        aujourd_hui = timezone.now().date()
+        if valeur.date() < aujourd_hui:
+            raise serializers.ValidationError(
+                "La date de l'activité ne peut pas être dans le passé."
+            )
+        return valeur
 
     def validate(self, attrs):
         instance = self.instance

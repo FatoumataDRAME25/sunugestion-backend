@@ -1,12 +1,46 @@
 from django.db import transaction
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 from .models import SessionCotisation, Cotisation
 
 
 class SessionCotisationSerializer(serializers.ModelSerializer):
-    class Meta : 
+    class Meta :
         model= SessionCotisation
         fields = ['id', 'libelle', 'montant', 'date_debut', 'date_fin', 'statut']
+
+    def validate_montant(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Le montant doit être supérieur à 0."
+            )
+        return value
+
+    def validate_date_debut(self, valeur):
+        aujourd_hui = timezone.now().date()
+        if valeur < aujourd_hui:
+            raise serializers.ValidationError(
+                "La date de début ne peut pas être dans le passé."
+            )
+        return valeur
+
+    def validate_date_fin(self, valeur):
+        aujourd_hui = timezone.now().date()
+        if valeur < aujourd_hui:
+            raise serializers.ValidationError(
+                "La date de fin ne peut pas être dans le passé."
+            )
+        return valeur
+
+    def validate(self, attrs):
+        date_debut = attrs.get('date_debut')
+        date_fin   = attrs.get('date_fin')
+        if date_debut and date_fin and date_fin < date_debut:
+            raise serializers.ValidationError(
+                {'date_fin': "La date de fin ne peut pas être antérieure à la date de début."}
+            )
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):

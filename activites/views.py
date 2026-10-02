@@ -78,6 +78,14 @@ class ActiviteViewSet(viewsets.ModelViewSet):
                 status=400
             )
 
+        # Vérifier que c'est bien le jour J
+        aujourd_hui = timezone.now().date()
+        if activite.date_activite.date() != aujourd_hui:
+            return Response(
+                {'message': "L'activité ne peut être démarrée que le jour prévu."},
+                status=400
+            )
+
         activite.statut = 'en_cours'
         activite.save(update_fields=['statut'])
 

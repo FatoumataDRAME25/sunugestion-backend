@@ -55,6 +55,13 @@ class PretSerializer(serializers.ModelSerializer):
             'statut',
         ]
 
+    def validate_montant(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Le montant doit être supérieur à 0."
+            )
+        return value
+
 
 
 class PretApprobationSerializer(serializers.Serializer):

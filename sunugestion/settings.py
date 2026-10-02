@@ -192,9 +192,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
 LANGUAGE_CODE = 'fr-FR'
-
+# ca permet de gérer les dates et heures en fonction du fuseau horaire défini dans TIME_ZONE
 TIME_ZONE = 'Africa/Dakar'
 
+# ca permet de gérer les traductions de language et l'internationalisation de l'application
 USE_I18N = True
 
 USE_TZ = True
@@ -215,10 +216,19 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
 MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    "default": {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": "smtp.gmail.com",
+            "port": 587,
+            "username": config("EMAIL_HOST_USER"),
+            "password": config("EMAIL_HOST_PASSWORD"),
+            "use_tls": True,
+        },
     },
 }
+
+DEFAULT_FROM_EMAIL = config("EMAIL_HOST_USER")
 
 API_URL= config('API_URL', default='http://localhost:8000')
 APP_URL = config('APP_URL', default='http://localhost:4200')
