@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from sunugestion.settings import APP_URL
 import re
+
+from authentication.validators import valider_telephone
 
 Utilisateur = get_user_model()
 
@@ -11,24 +12,6 @@ ROLES_AUTORISES = [
     'secretaire',
     'membre'
 ]
-
-FORMAT_TELEPHONE = r'^(70|71|75|76|77|78)[0-9]{7}$'
-
-
-def valider_telephone(telephone):
-    """Vérifie le format sénégalais et l'unicité."""
-    erreurs = []
-    telephone = str(telephone).strip()
-
-    if not re.match(FORMAT_TELEPHONE, telephone):
-        erreurs.append(
-            "Format invalide — doit commencer par 70, 71, 75, 76, 77 ou 78"
-        )
-
-    if Utilisateur.objects.filter(telephone=telephone).exists():
-        erreurs.append("Ce numéro existe déjà")
-
-    return telephone, erreurs
 
 
 def valider_role(role):
@@ -74,10 +57,8 @@ class AjoutMembreSerializer(serializers.Serializer):
 
     def validate_telephone(self, valeur):
         telephone, erreurs = valider_telephone(valeur)
-
         if erreurs:
             raise serializers.ValidationError(erreurs)
-
         return telephone
 
     def validate_prenom(self, valeur):
@@ -138,12 +119,7 @@ class ImportExcelSerializer(serializers.Serializer):
         wb = openpyxl.load_workbook(fichier)
         ws = wb.active
 
-        colonnes_requises = [
-            'prenom',
-            'nom',
-            'telephone',
-            'role'
-        ]
+        colonnes_requises = ['prenom', 'nom', 'telephone', 'role']
 
         membres_valides = []
         membres_invalides = []
@@ -156,7 +132,6 @@ class ImportExcelSerializer(serializers.Serializer):
 
         # Vérification des colonnes obligatoires
         for col in colonnes_requises:
-
             if col not in headers:
                 raise serializers.ValidationError(
                     f"Colonne manquante dans le fichier : '{col}'"
@@ -167,85 +142,48 @@ class ImportExcelSerializer(serializers.Serializer):
             ws.iter_rows(min_row=2, values_only=True),
             start=2
         ):
-
             # Ignorer les lignes complètement vides
             if not any(ligne):
                 continue
 
             donnees = dict(zip(headers, ligne))
-
             erreurs_ligne = []
 
-            prenom = str(
-                donnees.get('prenom', '') or ''
-            ).strip()
+            prenom = str(donnees.get('prenom', '') or '').strip()
+            nom = str(donnees.get('nom', '') or '').strip()
+            telephone = str(donnees.get('telephone', '') or '').strip()
+            role = str(donnees.get('role', '') or '').strip().lower()
 
-            nom = str(
-                donnees.get('nom', '') or ''
-            ).strip()
-
-            telephone = str(
-                donnees.get('telephone', '') or ''
-            ).strip()
-
-            role = str(
-                donnees.get('role', '') or ''
-            ).strip().lower()
-
-            # -----------------------------
             # Prénom
-            # -----------------------------
-
             if not prenom:
                 erreurs_ligne.append("Prénom manquant")
             else:
                 try:
-                    prenom = valider_nom_prenom(
-                        prenom,
-                        "prénom"
-                    )
+                    prenom = valider_nom_prenom(prenom, "prénom")
                 except serializers.ValidationError as erreur:
                     erreurs_ligne.extend(erreur.detail)
 
-            # -----------------------------
             # Nom
-            # -----------------------------
-
             if not nom:
                 erreurs_ligne.append("Nom manquant")
             else:
                 try:
-                    nom = valider_nom_prenom(
-                        nom,
-                        "nom"
-                    )
+                    nom = valider_nom_prenom(nom, "nom")
                 except serializers.ValidationError as erreur:
                     erreurs_ligne.extend(erreur.detail)
 
-            # -----------------------------
             # Téléphone
-            # -----------------------------
-
             if not telephone:
                 erreurs_ligne.append("Téléphone manquant")
             else:
-
-                telephone, erreurs_tel = valider_telephone(
-                    telephone
-                )
-
+                telephone, erreurs_tel = valider_telephone(telephone)
                 erreurs_ligne.extend(erreurs_tel)
 
-            # -----------------------------
             # Rôle
-            # -----------------------------
-
             if not role:
                 erreurs_ligne.append("Rôle manquant")
             else:
-
                 role, erreurs_role = valider_role(role)
-
                 erreurs_ligne.extend(erreurs_role)
 
             membre = {
@@ -257,13 +195,9 @@ class ImportExcelSerializer(serializers.Serializer):
             }
 
             if erreurs_ligne:
-
                 membre['erreurs'] = erreurs_ligne
-
                 membres_invalides.append(membre)
-
             else:
-
                 membres_valides.append(membre)
 
         return membres_valides, membres_invalides
@@ -306,32 +240,13 @@ class MembreSerializer(serializers.ModelSerializer):
         return valider_nom_prenom(valeur, "nom")
 
     def validate_telephone(self, valeur):
-
-        telephone = str(valeur).strip()
-
-        # Pendant une modification, le numéro actuel
-        # appartient déjà à l'utilisateur.
         utilisateur = self.instance
-
-        requete = Utilisateur.objects.filter(
-            telephone=telephone
-        ).exclude(
-            id=utilisateur.id
+        telephone, erreurs = valider_telephone(
+            valeur,
+            exclure_id=utilisateur.id if utilisateur else None
         )
-
-        if not re.match(
-            FORMAT_TELEPHONE,
-            telephone
-        ):
-            raise serializers.ValidationError(
-                "Format de téléphone invalide."
-            )
-
-        if requete.exists():
-            raise serializers.ValidationError(
-                "Ce numéro de téléphone est déjà utilisé."
-            )
-
+        if erreurs:
+            raise serializers.ValidationError(erreurs)
         return telephone
 
     def validate_email(self, valeur):

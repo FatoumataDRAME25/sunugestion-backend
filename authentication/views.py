@@ -22,7 +22,8 @@ from .serializers import (
     GIECreationSerializer,
     GIESerializer,
     InscriptionPresidentSerializer,
-    VerifierOTPSerializer
+    VerifierOTPSerializer,
+    RenvoyerOTPSerializer
 )
 
 Utilisateur = get_user_model()
@@ -184,6 +185,30 @@ class VerifierOTPView(APIView):
         )
 
 
+class RenvoyerOTPView(APIView):
+    """
+    Renvoie un nouveau code OTP au Président.
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=RenvoyerOTPSerializer
+    )
+    def post(self, request):
+        serializer = RenvoyerOTPSerializer(data=request.data)
+
+        if serializer.is_valid():
+            president = serializer.save()
+
+            return Response({
+                'message': 'Un nouveau code OTP a été envoyé à votre adresse e-mail.'
+            }, status=status.HTTP_200_OK)
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 class ConnexionView(APIView):
     """

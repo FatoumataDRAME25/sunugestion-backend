@@ -5,6 +5,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import GIE
+from .validators import valider_telephone
 import secrets
 
 Utilisateur = get_user_model()
@@ -89,11 +90,10 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         ]
 
     def validate_telephone(self, valeur):
-        if Utilisateur.objects.filter(telephone=valeur).exists():
-            raise serializers.ValidationError(
-                "Ce numéro de téléphone est déjà utilisé."
-            )
-        return valeur
+        telephone, erreurs = valider_telephone(valeur)
+        if erreurs:
+            raise serializers.ValidationError(erreurs)
+        return telephone
 
     def validate_pin(self, valeur):
         if not valeur.isdigit():
@@ -211,6 +211,56 @@ class VerifierOTPSerializer(serializers.Serializer):
         gie.statut = 'actif'
         gie.token_inscription = None
         gie.save()
+
+        return president
+
+
+class RenvoyerOTPSerializer(serializers.Serializer):
+    """Renvoie un nouveau code OTP au Président."""
+
+    token_inscription = serializers.CharField()
+
+    def validate(self, data):
+        try:
+            gie = GIE.objects.get(
+                token_inscription=data['token_inscription'],
+                statut='en_attente'
+            )
+
+            president = Utilisateur.objects.get(
+                gie=gie,
+                role='president',
+                statut='en_attente'
+            )
+
+            data['president'] = president
+
+        except (GIE.DoesNotExist, Utilisateur.DoesNotExist):
+            raise serializers.ValidationError(
+                "Session d'inscription invalide ou expirée."
+            )
+
+        return data
+
+    def create(self, validated_data):
+        president = validated_data['president']
+
+        # Générer un nouveau code OTP
+        otp = president.generer_otp()
+
+        # Envoyer le nouveau code par e-mail
+        send_mail(
+            subject="Votre nouveau code OTP - SunuGestion",
+            message=(
+                f"Bonjour {president.prenom},\n\n"
+                f"Votre nouveau code OTP pour activer votre compte "
+                f"SunuGestion est : {otp}\n\n"
+                f"Ce code est valable pendant 10 minutes.\n\n"
+                f"L'équipe SunuGestion"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[president.email],
+        )
 
         return president
 

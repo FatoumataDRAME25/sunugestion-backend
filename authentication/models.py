@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 import secrets
 import random
+from django.utils import timezone
+from datetime import timedelta
 
 class GIE(models.Model):
 
@@ -132,15 +134,14 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
     def generer_otp(self):
         """Génère un code OTP à 6 chiffres"""
         self.otp = str(random.randint(100000, 999999))
-        from django.utils import timezone
-        from datetime import timedelta
+
         self.otp_expiration = timezone.now() + timedelta(minutes=10)
         self.save()
         return self.otp
 
     def verifier_otp(self, code):
         """Vérifie que le code OTP est correct et non expiré"""
-        from django.utils import timezone
+        # from django.utils import timezone
         if self.otp != code:
             return False, "Code OTP incorrect."
         if timezone.now() > self.otp_expiration:

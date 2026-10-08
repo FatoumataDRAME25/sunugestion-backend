@@ -13,12 +13,14 @@ from .views import (
     VerifierOTPView,
     ProfilAdminView,
     ChangerPinAdminView,
+    RenvoyerOTPView,
 )
 
 urlpatterns = [
     path('creer-gie/', CreerGIEView.as_view(), name='creer-gie'),
     path('inscription/', InscriptionPresidentView.as_view(), name='inscription'),
     path('verifier-otp/', VerifierOTPView.as_view(), name='verifier-otp'),
+    path('renvoyer-otp/',RenvoyerOTPView.as_view(),name='renvoyer-otp'),
     path('connexion/', ConnexionView.as_view(), name='connexion'),
     path('liste-gies/', ListeGIEView.as_view(), name='liste-gies'),
     path('gies/statistiques/', StatistiquesGIEView.as_view(), name='statistiques-gies'),
