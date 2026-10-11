@@ -7,6 +7,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import GIE
 from .validators import valider_telephone
 import secrets
+from datetime import timedelta
+from django.utils import timezone
 
 Utilisateur = get_user_model()
 
@@ -289,7 +291,28 @@ class ConnexionSerializer(serializers.Serializer):
 
         # Vérifier le PIN
         valide, message = utilisateur.verifier_pin(pin)
+
         if not valide:
+            # Ajouter le temps restant si le compte est verrouillé
+            if utilisateur.verrouille and utilisateur.date_verrouillage:
+                maintenant = timezone.now()
+                fin_verrouillage = (
+                    utilisateur.date_verrouillage
+                    + timedelta(minutes=15)
+                )
+
+                secondes_restantes = max(
+                    0,
+                    int(
+                        (fin_verrouillage - maintenant).total_seconds()
+                    )
+                )
+
+                raise serializers.ValidationError({
+                    'message': message,
+                    'secondes_restantes': secondes_restantes
+                })
+
             raise serializers.ValidationError(message)
 
         data['utilisateur'] = utilisateur

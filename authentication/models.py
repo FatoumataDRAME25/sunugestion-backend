@@ -121,6 +121,7 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
     otp_expiration = models.DateTimeField(null=True, blank=True)
     tentatives_pin = models.IntegerField(default=0)
     verrouille = models.BooleanField(default=False)
+    date_verrouillage = models.DateTimeField(null=True, blank=True)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
@@ -160,29 +161,91 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
         return self.token_invitation
 
     def verrouiller(self):
-        """Verrouille le compte après 5 tentatives échouées"""
+        """Verrouille le compte pendant 15 minutes."""
         self.verrouille = True
-        self.save()
+        self.date_verrouillage = timezone.now()
 
-    def verifier_pin(self, pin):
+        self.save(update_fields=[
+            'verrouille',
+            'date_verrouillage',
+            'tentatives_pin'
+        ])
+
+    def verifier_pin(self, pin):    
+        """Vérifie le PIN et gère le verrouillage temporaire."""
+
+        maintenant = timezone.now()
+        duree_verrouillage = timedelta(minutes=15)
+
+        # 1. Vérifier si le compte est verrouillé
         if self.verrouille:
-            return False, "Compte verrouillé."
 
+            # Sécuriser les comptes déjà verrouillés
+            # qui n'ont pas encore de date de verrouillage.
+            if self.date_verrouillage is None:
+                self.date_verrouillage = maintenant
+                self.save(update_fields=['date_verrouillage'])
+
+                return False, (
+                    "Compte verrouillé. "
+                    "Réessayez dans 15 minutes."
+                )
+
+            # Calculer la fin du verrouillage
+            fin_verrouillage = (
+                self.date_verrouillage + duree_verrouillage
+            )
+
+            # Si les 15 minutes ne sont pas écoulées
+            if maintenant < fin_verrouillage:
+                secondes_restantes = int(
+                    (fin_verrouillage - maintenant).total_seconds()
+                )
+
+                return False, (
+                    f"Compte verrouillé. "
+                    f"Réessayez dans {secondes_restantes} secondes."
+                )
+            # 2. Les 15 minutes sont écoulées :
+            # déverrouiller automatiquement le compte.
+            self.verrouille = False
+            self.date_verrouillage = None
+            self.tentatives_pin = 0
+
+            self.save(update_fields=[
+                'verrouille',
+                'date_verrouillage',
+                'tentatives_pin'
+            ])
+
+        # 3. Vérifier le PIN
         if self.check_password(pin):
             self.tentatives_pin = 0
-            self.save()
+            self.save(update_fields=['tentatives_pin'])
+
             return True, "PIN correct."
 
+        # 4. Incrémenter le nombre de tentatives incorrectes
         self.tentatives_pin += 1
 
+        # 5. Verrouiller après 5 tentatives
         if self.tentatives_pin >= 5:
             self.verrouiller()
-            return False, "Compte est verrouillé vous avez fait 5 tentatives."
 
-        self.save()
+            return False, (
+                "Compte verrouillé pendant 15 minutes "
+                "après 5 tentatives incorrectes."
+            )
 
+        # 6. Informer l'utilisateur des tentatives restantes
         restantes = 5 - self.tentatives_pin
-        return False, f"PIN incorrect. {restantes} tentative(s) restante(s)."
+
+        self.save(update_fields=['tentatives_pin'])
+
+        return False, (
+            f"PIN incorrect. "
+            f"Il vous reste {restantes} tentative(s)."
+        )
 
     def __str__(self):
         return f"{self.prenom} {self.nom} — {self.role}"
