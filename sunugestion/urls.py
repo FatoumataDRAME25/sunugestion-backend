@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/notifications/', include('notifications.urls')),
     path('api/paiements/', include('paiements.urls')),
     path('api/gie/', include('gie.urls')),
+    path('api/diagnostic/', include('diagnostic.urls')),
 
     # OCR / extraction
     path('ocr/health', extraction_views.health, name='ocr-health'),

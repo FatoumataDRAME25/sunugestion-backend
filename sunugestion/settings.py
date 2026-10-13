@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'notifications',
     'paiements',
     'gie',
+    'diagnostic',
 ]
 
 # Modèle utilisateur personnalisé
