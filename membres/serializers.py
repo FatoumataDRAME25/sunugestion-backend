@@ -224,11 +224,13 @@ class MembreSerializer(serializers.ModelSerializer):
         ]
 
         # Champs protégés :
+        # telephone → identifiant de connexion, non modifiable depuis le profil
         # role   → modifiable uniquement via modifier_role (président)
         # statut → modifiable uniquement via suspendre/reactiver (président)
         # gie    → jamais modifiable par l'utilisateur (non exposé dans fields)
         read_only_fields = [
             'id',
+            'telephone',
             'role',
             'statut',
         ]

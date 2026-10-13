@@ -11,7 +11,7 @@ class GieSerializer(serializers.ModelSerializer):
             'id',
             'nom',
             'region',
-            'secteur',
+            'type_gie',
             'telephone',
             'code',
             'statut',
@@ -28,6 +28,6 @@ class GieModifierSerializer(serializers.ModelSerializer):
         fields = [
             'nom',
             'region',
-            'secteur',
+            'type_gie',
             'telephone',
         ]

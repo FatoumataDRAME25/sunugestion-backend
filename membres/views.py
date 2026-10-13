@@ -425,9 +425,10 @@ class MembreViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'], url_path='changer-pin')
     def changer_pin(self, request):
-        pin_actuel = request.data.get('pinActuel', '')
-        nouveau_pin = request.data.get('nouveauPin', '')
-        confirmation_pin = request.data.get('confirmationPin', '')
+        # Le parser camelCase convertit les clés reçues en snake_case
+        pin_actuel = request.data.get('pin_actuel', request.data.get('pinActuel', ''))
+        nouveau_pin = request.data.get('nouveau_pin', request.data.get('nouveauPin', ''))
+        confirmation_pin = request.data.get('confirmation_pin', request.data.get('confirmationPin', ''))
 
         # Vérification des champs obligatoires
         if not pin_actuel or not nouveau_pin or not confirmation_pin:
