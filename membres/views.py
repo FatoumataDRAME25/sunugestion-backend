@@ -47,6 +47,9 @@ class MembreViewSet(viewsets.ViewSet):
     - activation_publique        → AllowAny
     """
 
+    # Toujours permis, même si l'abonnement du groupement a expiré
+    actions_autorisees_en_lecture_seule = {'partial_update', 'changer_pin'}
+
     def get_permissions(self):
         if self.action == 'activation_publique':
             return [AllowAny()]

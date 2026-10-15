@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/gie/', include('gie.urls')),
     path('api/diagnostic/', include('diagnostic.urls')),
     path('api/rapports/', include('rapports.urls')),
+    path('api/abonnements/', include('abonnements.urls')),
 
     # OCR / extraction
     path('ocr/health', extraction_views.health, name='ocr-health'),

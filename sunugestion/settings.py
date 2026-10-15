@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'gie',
     'diagnostic',
     'rapports',
+    'abonnements',
 
 ]
 
