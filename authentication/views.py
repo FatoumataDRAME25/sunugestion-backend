@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.generics import ListAPIView
 
 from authentication.models import GIE
+from authentication.permissions import EstAdministrateur
 
 from .serializers import (
     ConnexionSerializer,
@@ -70,19 +71,19 @@ class CreerGIEView(APIView):
 class ListeGIEView(ListAPIView):
     queryset = GIE.objects.all().order_by('-date_creation')
     serializer_class = GIESerializer
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
 
 # Voir detail d'un GIE
 class DetailGIEView(RetrieveUpdateAPIView):
     queryset = GIE.objects.all()
     serializer_class = GIESerializer
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
 
 class StatistiquesGIEView(APIView):
 
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
     serializer_class = GIESerializer
 
     @extend_schema(
@@ -270,8 +271,6 @@ class DeconnexionView(APIView):
         )
 
 
-from authentication.permissions import EstAdministrateur
-
 # ──────────────────────────────────────────────────────
 # PROFIL ADMIN
 # GET  /api/auth/profil/  → lire son profil
@@ -382,7 +381,7 @@ class ChangerPinAdminView(APIView):
 
 
 class EvolutionGIEView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
     def get(self, request):
 
@@ -430,7 +429,7 @@ class EvolutionGIEView(APIView):
 
 
 class RepartitionSecteursView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
     def get(self, request):
 

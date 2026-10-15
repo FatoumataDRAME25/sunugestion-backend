@@ -6,9 +6,47 @@ from .models import SessionCotisation, Cotisation
 
 
 class SessionCotisationSerializer(serializers.ModelSerializer):
+
+    # Indicateurs de la session, en lecture seule (attendus par le tableau de bord)
+    nombre_membres = serializers.SerializerMethodField()
+    nombre_paies = serializers.SerializerMethodField()
+    nombre_en_attente = serializers.SerializerMethodField()
+    total_attendu = serializers.SerializerMethodField()
+    total_collecte = serializers.SerializerMethodField()
+
     class Meta :
         model= SessionCotisation
-        fields = ['id', 'libelle', 'montant', 'date_debut', 'date_fin', 'statut']
+        fields = [
+            'id', 'libelle', 'montant', 'date_debut', 'date_fin', 'statut',
+            'nombre_membres', 'nombre_paies', 'nombre_en_attente',
+            'total_attendu', 'total_collecte',
+        ]
+
+    def _compteurs(self, session):
+        # Valeurs annotées par la vue de liste, sinon calculées (ex. après création)
+        nombre = getattr(session, 'nb_cotisations', None)
+        paies = getattr(session, 'nb_paies', None)
+        if nombre is None or paies is None:
+            nombre = session.cotisations.count()
+            paies = session.cotisations.filter(statut='paye').count()
+        return nombre, paies
+
+    def get_nombre_membres(self, session):
+        return self._compteurs(session)[0]
+
+    def get_nombre_paies(self, session):
+        return self._compteurs(session)[1]
+
+    def get_nombre_en_attente(self, session):
+        nombre, paies = self._compteurs(session)
+        return nombre - paies
+
+    def get_total_attendu(self, session):
+        return self._compteurs(session)[0] * session.montant
+
+    def get_total_collecte(self, session):
+        # Toutes les cotisations d'une session ont le même montant
+        return self._compteurs(session)[1] * session.montant
 
     def validate_montant(self, value):
         if value <= 0:

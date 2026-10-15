@@ -1,6 +1,7 @@
 from rest_framework import generics
 from rest_framework.generics import RetrieveAPIView
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -35,6 +36,14 @@ class SessionCotisationCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         return SessionCotisation.objects.filter(
             createur__gie=self.request.user.gie
+        ).annotate(
+            # Compteurs pour les indicateurs du serializer (une seule requête)
+            nb_cotisations=Count('cotisations', distinct=True),
+            nb_paies=Count(
+                'cotisations',
+                filter=Q(cotisations__statut='paye'),
+                distinct=True
+            ),
         )
 
     def perform_create(self, serializer):

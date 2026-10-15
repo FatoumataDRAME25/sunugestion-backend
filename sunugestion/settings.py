@@ -126,7 +126,9 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
     "http://127.0.0.1:4200",
-    'https://stitch-freebie-dreamless.ngrok-free.dev'
+    'https://stitch-freebie-dreamless.ngrok-free.dev',
+    # Adresse ngrok utilisée dans les liens d'invitation (pages ajouter / importer membre)
+    'https://reviving-gurgle-pauper.ngrok-free.dev',
 ]
 
 ROOT_URLCONF = 'sunugestion.urls'

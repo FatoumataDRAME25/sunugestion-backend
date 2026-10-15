@@ -49,6 +49,12 @@ class GIE(models.Model):
 
 
 
+# Durée de validité d'un lien d'invitation. Passé ce délai, l'activation est
+# refusée et le compte en attente est supprimé par la tâche quotidienne
+# « supprimer_invitations_expirees ».
+DUREE_VALIDITE_INVITATION = timedelta(hours=72)
+
+
 class UtilisateurManager(BaseUserManager):
 
     def create_user(self, telephone, nom, prenom, role, gie=None, password=None, **extra_fields):
@@ -98,6 +104,14 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
         ('en_attente', 'En attente'),
     ]
 
+    # Titre dans le bureau (adjoints). Purement descriptif : il ne donne
+    # aucun droit, les permissions dépendent uniquement du rôle.
+    FONCTIONS_BUREAU = [
+        ('vice_president', 'Vice-président'),
+        ('tresorier_adjoint', 'Trésorier adjoint'),
+        ('secretaire_adjoint', 'Secrétaire adjoint'),
+    ]
+
     gie = models.ForeignKey(
         GIE,
         on_delete=models.CASCADE,
@@ -110,6 +124,12 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
     telephone = models.CharField(max_length=20, unique=True)
     email = models.EmailField(max_length=255, null=True, blank=True, unique=True)
     role = models.CharField(max_length=20, choices=ROLES)
+    fonction_bureau = models.CharField(
+        max_length=30,
+        choices=FONCTIONS_BUREAU,
+        blank=True,
+        default=''
+    )
     statut = models.CharField(
         max_length=20,
         choices=STATUT_CHOICES,
@@ -155,10 +175,22 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
 
 
     def generer_token_invitation(self):
-        """Génère et sauvegarde un token unique pour l'invitation SMS"""
+        """
+        Génère et sauvegarde un token unique pour l'invitation SMS,
+        valable DUREE_VALIDITE_INVITATION. Un nouvel appel invalide l'ancien
+        lien et repart pour une durée complète.
+        """
         self.token_invitation = secrets.token_urlsafe(32)
+        self.token_expiration = timezone.now() + DUREE_VALIDITE_INVITATION
         self.save()
         return self.token_invitation
+
+    def invitation_expiree(self):
+        """Vrai si le lien d'invitation a dépassé sa date d'expiration."""
+        return (
+            self.token_expiration is not None
+            and timezone.now() >= self.token_expiration
+        )
 
     def verrouiller(self):
         """Verrouille le compte pendant 15 minutes."""

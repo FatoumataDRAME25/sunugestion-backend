@@ -209,6 +209,11 @@ class ImportExcelSerializer(serializers.Serializer):
 
 class MembreSerializer(serializers.ModelSerializer):
 
+    # Date d'expiration du lien d'invitation (comptes en attente uniquement)
+    invitation_expiration = serializers.DateTimeField(
+        source='token_expiration', read_only=True
+    )
+
     class Meta:
 
         model = Utilisateur
@@ -220,7 +225,9 @@ class MembreSerializer(serializers.ModelSerializer):
             'telephone',
             'email',
             'role',
+            'fonction_bureau',
             'statut',
+            'invitation_expiration',
         ]
 
         # Champs protégés :
@@ -232,6 +239,7 @@ class MembreSerializer(serializers.ModelSerializer):
             'id',
             'telephone',
             'role',
+            'fonction_bureau',
             'statut',
         ]
 

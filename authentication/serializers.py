@@ -283,6 +283,20 @@ class ConnexionSerializer(serializers.Serializer):
                 "Numéro de téléphone introuvable."
             )
 
+        # Compte suspendu par le président du groupement
+        if utilisateur.statut == 'inactif':
+            raise serializers.ValidationError(
+                "Votre compte a été suspendu. "
+                "Contactez le président de votre groupement."
+            )
+
+        # Groupement désactivé par l'administrateur de la plateforme
+        if utilisateur.gie is not None and utilisateur.gie.statut == 'inactif':
+            raise serializers.ValidationError(
+                "Votre groupement a été désactivé. "
+                "Contactez l'administrateur de SunuGestion."
+            )
+
         # Vérifier que le compte est actif
         if utilisateur.statut != 'actif':
             raise serializers.ValidationError(

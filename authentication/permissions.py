@@ -1,6 +1,29 @@
 from rest_framework.permissions import BasePermission
 
 
+MESSAGE_GIE_DESACTIVE = (
+    "Votre groupement a été désactivé. "
+    "Contactez l'administrateur de SunuGestion."
+)
+
+
+def gie_utilisable(permission, utilisateur):
+    """
+    Vrai si l'utilisateur appartient à un GIE qui n'a pas été désactivé
+    par l'administrateur. Sinon, adapte le message d'erreur renvoyé.
+    """
+    gie = getattr(utilisateur, 'gie', None)
+
+    if gie is None:
+        return False
+
+    if gie.statut == 'inactif':
+        permission.message = MESSAGE_GIE_DESACTIVE
+        return False
+
+    return True
+
+
 class EstMembreGIE(BasePermission):
     """
     Autorise uniquement les utilisateurs appartenant à un GIE.
@@ -13,7 +36,7 @@ class EstMembreGIE(BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.role != 'administrateur'
-            and request.user.gie is not None
+            and gie_utilisable(self, request.user)
         )
 
 
@@ -42,7 +65,7 @@ class EstPresident(BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.role == 'president'
-            and request.user.gie is not None
+            and gie_utilisable(self, request.user)
         )
 
 
@@ -57,7 +80,7 @@ class EstPresidentOuSecretaire(BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.role in ('president', 'secretaire')
-            and request.user.gie is not None
+            and gie_utilisable(self, request.user)
         )
 
 
@@ -72,7 +95,7 @@ class EstPresidentOuTresorier(BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.role in ('president', 'tresorier')
-            and request.user.gie is not None
+            and gie_utilisable(self, request.user)
         )
 
 
@@ -87,5 +110,5 @@ class EstTresorier(BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.role == 'tresorier'
-            and request.user.gie is not None
+            and gie_utilisable(self, request.user)
         )

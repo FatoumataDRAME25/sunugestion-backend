@@ -4,6 +4,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from authentication.permissions import MESSAGE_GIE_DESACTIVE
+
 from .calculs import calculer_indicateurs
 from .ia_diagnostic import analyser_diagnostic
 from .ia_chatbot import repondre_question
@@ -27,6 +29,13 @@ class DiagnosticAPIView(APIView):
                 {
                     'detail': 'Aucun groupement associé à votre compte.'
                 },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Groupement désactivé par l'administrateur de la plateforme
+        if gie.statut == 'inactif':
+            return Response(
+                {'detail': MESSAGE_GIE_DESACTIVE},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -65,6 +74,13 @@ class AssistantChatAPIView(APIView):
                 {
                     'detail': 'Aucun groupement associé à votre compte.'
                 },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Groupement désactivé par l'administrateur de la plateforme
+        if gie.statut == 'inactif':
+            return Response(
+                {'detail': MESSAGE_GIE_DESACTIVE},
                 status=status.HTTP_403_FORBIDDEN
             )
 

@@ -100,3 +100,134 @@ class VerrouillagePinTestCase(TestCase):
         self.assertEqual(self.utilisateur.tentatives_pin, 0)
 
         print("OK : compteur réinitialisé après connexion réussie.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Endpoints d'administration et groupements désactivés
+# ──────────────────────────────────────────────────────────────────────────
+
+from rest_framework.test import APIClient
+
+from .models import GIE
+
+
+ENDPOINTS_ADMIN = [
+    '/api/auth/liste-gies/',
+    '/api/auth/gies/statistiques/',
+    '/api/auth/gies/evolution/',
+    '/api/auth/gies/repartition-secteur/',
+]
+
+
+class EndpointsAdministrationTestCase(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.gie = GIE.objects.create(
+            nom='Groupement Alpha', region='Dakar', type_gie='groupement',
+            code='ALPHA', statut='actif'
+        )
+        cls.administrateur = Utilisateur.objects.create_user(
+            telephone='770000099', nom='Admin', prenom='Plateforme',
+            role='administrateur', statut='actif'
+        )
+        cls.president = Utilisateur.objects.create_user(
+            telephone='770000001', nom='Diop', prenom='Awa',
+            role='president', gie=cls.gie, statut='actif'
+        )
+
+    def client_de(self, utilisateur=None):
+        client = APIClient()
+        if utilisateur is not None:
+            client.force_authenticate(user=utilisateur)
+        return client
+
+    def test_reserves_a_l_administrateur(self):
+        url_detail = f'/api/auth/gies/{self.gie.id}/'
+
+        for url in ENDPOINTS_ADMIN + [url_detail]:
+            with self.subTest(url=url):
+                self.assertEqual(self.client_de().get(url).status_code, 401)
+                self.assertEqual(self.client_de(self.president).get(url).status_code, 403)
+                self.assertEqual(self.client_de(self.administrateur).get(url).status_code, 200)
+
+    def test_modification_d_un_gie_impossible_sans_etre_administrateur(self):
+        url = f'/api/auth/gies/{self.gie.id}/'
+
+        for utilisateur in (None, self.president):
+            with self.subTest(utilisateur=utilisateur):
+                reponse = self.client_de(utilisateur).patch(url, {'statut': 'inactif'}, format='json')
+                self.assertIn(reponse.status_code, (401, 403))
+                self.gie.refresh_from_db()
+                self.assertEqual(self.gie.statut, 'actif')
+
+        reponse = self.client_de(self.administrateur).patch(url, {'statut': 'inactif'}, format='json')
+        self.assertEqual(reponse.status_code, 200)
+        self.gie.refresh_from_db()
+        self.assertEqual(self.gie.statut, 'inactif')
+
+    def test_inscription_toujours_publique(self):
+        # Création d'un GIE à l'inscription : reste accessible sans connexion
+        reponse = self.client_de().post('/api/auth/creer-gie/', {}, format='json')
+        self.assertEqual(reponse.status_code, 400)
+
+
+class GieDesactiveTestCase(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.gie = GIE.objects.create(
+            nom='Groupement Alpha', region='Dakar', type_gie='groupement',
+            code='ALPHA', statut='actif'
+        )
+        cls.president = Utilisateur.objects.create_user(
+            telephone='770000001', nom='Diop', prenom='Awa',
+            role='president', gie=cls.gie, statut='actif', password='1234'
+        )
+
+    def desactiver(self):
+        GIE.objects.filter(pk=self.gie.pk).update(statut='inactif')
+        self.president.refresh_from_db()
+
+    def connexion(self):
+        return APIClient().post(
+            '/api/auth/connexion/',
+            {'telephone': self.president.telephone, 'pin': '1234'},
+            format='json'
+        )
+
+    def test_gie_actif_fonctionne_normalement(self):
+        client = APIClient()
+        client.force_authenticate(user=self.president)
+
+        self.assertEqual(client.get('/api/membres/membres/').status_code, 200)
+        self.assertEqual(self.connexion().status_code, 200)
+
+    def test_membres_d_un_gie_desactive_bloques(self):
+        self.desactiver()
+        client = APIClient()
+        client.force_authenticate(user=self.president)
+
+        for url in ('/api/membres/membres/', '/api/gie/infos/', '/api/prets/', '/api/historiques/solde/', '/api/diagnostic/'):
+            with self.subTest(url=url):
+                reponse = client.get(url)
+                self.assertEqual(reponse.status_code, 403)
+                self.assertIn('désactivé', reponse.json()['detail'])
+
+    def test_connexion_refusee_pour_un_gie_desactive(self):
+        self.desactiver()
+
+        reponse = self.connexion()
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('désactivé', str(reponse.json()))
+        self.assertNotIn('tokens', reponse.json())
+
+    def test_reactivation_retablit_l_acces(self):
+        self.desactiver()
+        GIE.objects.filter(pk=self.gie.pk).update(statut='actif')
+        self.president.refresh_from_db()
+
+        client = APIClient()
+        client.force_authenticate(user=self.president)
+        self.assertEqual(client.get('/api/membres/membres/').status_code, 200)
