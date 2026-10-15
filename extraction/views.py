@@ -1,10 +1,15 @@
 import re
+from functools import wraps
 
 import httpx
 from asgiref.sync import async_to_sync
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from authentication.permissions import EstPresidentOuSecretaire
 
 from membres.serializers import (
     valider_nom_prenom,
@@ -130,11 +135,37 @@ def _error_response(message: str, status: int) -> JsonResponse:
     return JsonResponse({"detail": message}, status=status)
 
 
+def reserve_au_bureau(vue):
+    """
+    L'analyse d'images est coûteuse : elle est réservée au président et au
+    secrétaire d'un groupement (import de membres), connectés avec leur jeton.
+    """
+    @wraps(vue)
+    def enveloppe(request, *args, **kwargs):
+        try:
+            authentification = JWTAuthentication().authenticate(request)
+        except AuthenticationFailed:
+            authentification = None
+
+        if authentification is None:
+            return _error_response("Authentification requise.", 401)
+
+        request.user = authentification[0]
+        permission = EstPresidentOuSecretaire()
+        if not permission.has_permission(request, None):
+            return _error_response(permission.message, 403)
+
+        return vue(request, *args, **kwargs)
+
+    return enveloppe
+
+
 def health(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok"})
 
 
 @csrf_exempt
+@reserve_au_bureau
 def ocr_only(request: HttpRequest) -> JsonResponse:
     """
     POST /api/ocr
@@ -159,6 +190,7 @@ def ocr_only(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@reserve_au_bureau
 def process_document(request: HttpRequest) -> JsonResponse:
     """
     POST /api/process-document

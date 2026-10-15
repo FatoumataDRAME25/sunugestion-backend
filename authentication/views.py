@@ -10,6 +10,7 @@ from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework import status, serializers
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from rest_framework.generics import ListAPIView
@@ -45,6 +46,8 @@ class CreerGIEView(APIView):
     Retourne un token d'inscription temporaire.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'inscription'
 
     serializer_class = GIECreationSerializer
     @extend_schema(
@@ -130,6 +133,8 @@ class InscriptionPresidentView(APIView):
     Le système génère et envoie un OTP par SMS.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'inscription'
 
     @extend_schema(
         request=InscriptionPresidentSerializer
@@ -156,6 +161,8 @@ class VerifierOTPView(APIView):
     Le système active le compte et retourne les tokens JWT.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'otp'
 
     @extend_schema(
         request=VerifierOTPSerializer
@@ -192,6 +199,8 @@ class RenvoyerOTPView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'otp'
 
     @extend_schema(
         request=RenvoyerOTPSerializer
@@ -217,6 +226,8 @@ class ConnexionView(APIView):
     Retourne les tokens JWT si les identifiants sont corrects.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'connexion'
 
     @extend_schema(
         request=ConnexionSerializer

@@ -231,3 +231,105 @@ class GieDesactiveTestCase(TestCase):
         client = APIClient()
         client.force_authenticate(user=self.president)
         self.assertEqual(client.get('/api/membres/membres/').status_code, 200)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Sécurité de la connexion et de l'inscription
+# ──────────────────────────────────────────────────────────────────────────
+
+from unittest.mock import patch
+
+from django.core.cache import cache
+from rest_framework.throttling import ScopedRateThrottle
+
+
+class OtpTestCase(TestCase):
+
+    def setUp(self):
+        cache.clear()
+        self.president = Utilisateur.objects.create_user(
+            telephone='770000050', nom='Diop', prenom='Awa', role='president',
+            statut='en_attente', email='awa@example.com'
+        )
+
+    def test_code_a_six_chiffres(self):
+        code = self.president.generer_otp()
+        self.assertTrue(code.isdigit())
+        self.assertEqual(len(code), 6)
+
+    def test_code_invalide_apres_cinq_erreurs(self):
+        code = self.president.generer_otp()
+        faux = '000000' if code != '000000' else '111111'
+
+        for _ in range(4):
+            valide, message = self.president.verifier_otp(faux)
+            self.assertFalse(valide)
+            self.assertIn('incorrect', message)
+
+        valide, message = self.president.verifier_otp(faux)
+        self.assertFalse(valide)
+        self.assertIn('Trop de tentatives', message)
+
+        # Même le bon code ne fonctionne plus : il faut en demander un nouveau
+        valide, _ = self.president.verifier_otp(code)
+        self.assertFalse(valide)
+
+    def test_nouveau_code_remet_le_compteur_a_zero(self):
+        self.president.generer_otp()
+        for _ in range(4):
+            self.president.verifier_otp('000000' if self.president.otp != '000000' else '111111')
+
+        code = self.president.generer_otp()
+        valide, _ = self.president.verifier_otp(code)
+        self.assertTrue(valide)
+
+
+class ConnexionSecuriteTestCase(TestCase):
+
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def connexion(self, telephone='779999999', pin='1234'):
+        return APIClient().post('/api/auth/connexion/', {'telephone': telephone, 'pin': pin}, format='json')
+
+    def test_numero_inconnu_message_generique(self):
+        reponse = self.connexion()
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('Numéro de téléphone ou code PIN incorrect', str(reponse.json()))
+        self.assertNotIn('introuvable', str(reponse.json()))
+
+    def test_trop_de_tentatives_de_connexion(self):
+        with patch.dict(ScopedRateThrottle.THROTTLE_RATES, {'connexion': '3/min'}):
+            codes = [self.connexion().status_code for _ in range(4)]
+
+        self.assertEqual(codes[:3], [400, 400, 400])
+        self.assertEqual(codes[3], 429)
+
+
+class CreationGieValidationTestCase(TestCase):
+
+    def creer(self, **donnees):
+        corps = {'nom': 'Groupement Test', 'region': 'Dakar', 'typeGie': 'groupement', **donnees}
+        return APIClient().post('/api/auth/creer-gie/', corps, format='json')
+
+    def test_nom_avec_balises_refuse(self):
+        reponse = self.creer(nom='<script>alert(1)</script>')
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('nom', reponse.json())
+        self.assertFalse(GIE.objects.filter(nom__contains='script').exists())
+
+    def test_telephone_avec_lettres_refuse(self):
+        reponse = self.creer(telephone='77abc1234')
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('telephone', reponse.json())
+
+    def test_creation_valide_avec_ou_sans_telephone(self):
+        self.assertEqual(self.creer(nom='Avec numéro', telephone='77 123 45 67').status_code, 201)
+        self.assertEqual(GIE.objects.get(nom='Avec numéro').telephone, '771234567')
+        self.assertEqual(self.creer(nom='Sans numéro').status_code, 201)

@@ -101,11 +101,18 @@ class ImportExcelSerializer(serializers.Serializer):
 
     fichier = serializers.FileField()
 
+    TAILLE_MAX_OCTETS = 5 * 1024 * 1024  # 5 Mo
+
     def validate_fichier(self, fichier):
 
         if not fichier.name.endswith('.xlsx'):
             raise serializers.ValidationError(
                 "Le fichier doit être au format .xlsx"
+            )
+
+        if fichier.size > self.TAILLE_MAX_OCTETS:
+            raise serializers.ValidationError(
+                "Le fichier est trop volumineux (5 Mo maximum)."
             )
 
         return fichier
@@ -116,7 +123,13 @@ class ImportExcelSerializer(serializers.Serializer):
 
         fichier = self.validated_data['fichier']
 
-        wb = openpyxl.load_workbook(fichier)
+        # Un fichier renommé en .xlsx ou endommagé fait échouer openpyxl
+        try:
+            wb = openpyxl.load_workbook(fichier)
+        except Exception:
+            raise serializers.ValidationError(
+                "Le fichier est illisible ou n'est pas un vrai fichier Excel (.xlsx)."
+            )
         ws = wb.active
 
         colonnes_requises = ['prenom', 'nom', 'telephone', 'role']

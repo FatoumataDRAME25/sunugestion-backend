@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from authentication.models import GIE
+from authentication.validators import valider_nom_gie, valider_telephone_gie
 
 
 class GieSerializer(serializers.ModelSerializer):
@@ -31,3 +32,9 @@ class GieModifierSerializer(serializers.ModelSerializer):
             'type_gie',
             'telephone',
         ]
+
+    def validate_nom(self, valeur):
+        return valider_nom_gie(valeur)
+
+    def validate_telephone(self, valeur):
+        return valider_telephone_gie(valeur)

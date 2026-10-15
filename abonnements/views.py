@@ -15,6 +15,7 @@ from authentication.permissions import (
 from paiements.paydunya_service import (
     PayDunyaError,
     PayDunyaNetworkError,
+    construire_url_annulation,
     construire_url_retour,
     creer_facture,
     verifier_facture,
@@ -149,6 +150,7 @@ class PayerAbonnementView(APIView):
                 nom_client=f"{request.user.prenom} {request.user.nom}",
                 telephone_client=request.user.telephone or '',
                 return_url=construire_url_retour('abonnement', paiement.id),
+                cancel_url=construire_url_annulation('abonnement', paiement.id),
             )
         except PayDunyaNetworkError as exc:
             marquer_paiement_echoue(paiement)

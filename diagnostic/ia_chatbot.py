@@ -1,5 +1,9 @@
+import logging
+
 import httpx
 from decouple import config
+
+logger = logging.getLogger(__name__)
 
 
 OPENROUTER_API_KEY = config("OPENROUTER_API_KEY", default="")
@@ -93,7 +97,6 @@ Réponds directement à la question.
             resultat = response.json()
 
             contenu = resultat["choices"][0]["message"]["content"]
-            print("Réponse brute OpenRouter :", resultat)
 
             if not isinstance(contenu, str) or not contenu.strip():
                 raise ValueError("La réponse de l'IA est vide.")
@@ -110,9 +113,8 @@ Réponds directement à la question.
         TypeError,
         ValueError,
     ) as erreur:
-        print(
-            f"Erreur du chatbot IA : "
-            f"{type(erreur).__name__} - {erreur}"
+        logger.warning(
+            "Erreur du chatbot IA : %s - %s", type(erreur).__name__, erreur
         )
 
         return {

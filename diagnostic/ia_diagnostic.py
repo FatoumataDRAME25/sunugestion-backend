@@ -1,6 +1,10 @@
+import logging
+
 import httpx
 import json
 from decouple import config
+
+logger = logging.getLogger(__name__)
 
 
 OPENROUTER_API_KEY = config("OPENROUTER_API_KEY", default="")
@@ -285,10 +289,9 @@ N'ajoute aucun texte avant ou après le JSON.
     TypeError,
     ValueError,
 ) as erreur:
-        print(
-        f"Erreur du diagnostic IA : "
-        f"{type(erreur).__name__} - {erreur}"
-    )
+        logger.warning(
+            "Erreur du diagnostic IA : %s - %s", type(erreur).__name__, erreur
+        )
 
     return {
         "disponible": False,

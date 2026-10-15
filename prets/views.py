@@ -17,9 +17,11 @@ from paiements.paydunya_service import (
     creer_facture,
     initier_decaissement,
     soumettre_decaissement,
+    verifier_decaissement,
     PayDunyaError,
     PayDunyaNetworkError,
     _RETURN_URL,
+    construire_url_annulation,
 )
 
 from .models import ReglePret, Pret
@@ -310,8 +312,10 @@ class PretApprobationView(generics.GenericAPIView):
     def post(self, request, pk):
 
         try:
+            # Prêt du groupement du président uniquement
             pret = Pret.objects.get(
-                id=pk
+                id=pk,
+                membre__gie=request.user.gie
             )
         except Pret.DoesNotExist:
             return Response(
@@ -425,7 +429,8 @@ class PretDecaissementView(generics.GenericAPIView):
     def post(self, request, pk):
 
         try:
-            pret = Pret.objects.get(id=pk)
+            # Prêt du groupement du trésorier uniquement
+            pret = Pret.objects.get(id=pk, membre__gie=request.user.gie)
         except Pret.DoesNotExist:
             return Response({'message': 'Ce prêt n existe pas.'}, status=404)
 
@@ -433,6 +438,12 @@ class PretDecaissementView(generics.GenericAPIView):
             raise ValidationError(
                 {'pret': 'Seul un prêt approuvé peut être décaissé.'}
             )
+
+        # Un envoi PayDunya a déjà été lancé : ne jamais envoyer l'argent deux fois
+        if pret.token_decaissement_paydunya:
+            reponse_envoi_existant = self._verifier_envoi_existant(pret)
+            if reponse_envoi_existant is not None:
+                return reponse_envoi_existant
 
         gie = pret.membre.gie
 
@@ -452,6 +463,50 @@ class PretDecaissementView(generics.GenericAPIView):
 
         # ─── Décaissement en espèces — comportement inchangé ──────────────────
         return self._decaissement_especes(pret, mode_paiement)
+
+    def _verifier_envoi_existant(self, pret):
+        """
+        Demande à PayDunya où en est l'envoi déjà lancé pour ce prêt.
+        - réussi            → le décaissement est validé, pas de nouvel envoi ;
+        - en cours / inconnu → refus ;
+        - échoué            → None : un nouveau décaissement est permis.
+        """
+        try:
+            verification = verifier_decaissement(pret.token_decaissement_paydunya)
+        except (PayDunyaNetworkError, PayDunyaError):
+            return Response(
+                {'detail': (
+                    "Un décaissement PayDunya est déjà en cours pour ce prêt et son "
+                    "statut n'a pas pu être vérifié. Réessayez dans quelques minutes."
+                )},
+                status=409
+            )
+
+        statut = verification['statut']
+
+        if statut == 'success':
+            # Import local : paiements.views importe déjà ce module
+            from paiements.views import _valider_decaissement
+            _valider_decaissement(pret, verification['montant_confirme'])
+            pret.refresh_from_db()
+            return Response(
+                {'detail': "Ce prêt a déjà été décaissé par PayDunya.",
+                 'pret': PretSerializer(pret).data},
+                status=409
+            )
+
+        if statut == 'failed':
+            pret.token_decaissement_paydunya = None
+            pret.save(update_fields=['token_decaissement_paydunya'])
+            return None
+
+        return Response(
+            {'detail': (
+                "Un décaissement PayDunya est déjà en cours pour ce prêt. "
+                "Attendez sa confirmation avant de réessayer."
+            )},
+            status=409
+        )
 
     def _initier_decaissement_electronique(self, pret, mode_paiement):
         """
@@ -551,7 +606,8 @@ class PretRemboursementView(generics.GenericAPIView):
     def post(self, request, pk):
 
         try:
-            pret = Pret.objects.get(id=pk)
+            # Prêt du groupement de l'utilisateur uniquement
+            pret = Pret.objects.get(id=pk, membre__gie=request.user.gie)
         except Pret.DoesNotExist:
             return Response({'message': 'Ce prêt n existe pas.'}, status=404)
 
@@ -609,6 +665,7 @@ class PretRemboursementView(generics.GenericAPIView):
                     f"?type=pret"
                     f"&id={pret.id}"
                 ),
+                cancel_url=construire_url_annulation('pret', pret.id),
             )
         except PayDunyaNetworkError as exc:
             return Response(

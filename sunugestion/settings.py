@@ -12,29 +12,23 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
-from decouple import config
+from decouple import Csv, config
 
 import os
-#from dotenv import load_dotenv
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Valeurs lues uniquement dans le fichier .env (jamais écrites dans le code).
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = ['*']
+# Noms de domaine acceptés, séparés par des virgules dans le .env
+# (ex. ALLOWED_HOSTS=sunugestion.sn,api.sunugestion.sn).
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#z06hmd#@-e9b(meis@yi#xrc2n(($lfwd_6j6+qhx66c9__m#'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ['*']
+# Exécution des tests automatiques (python manage.py test)
+TESTS_EN_COURS = len(sys.argv) > 1 and sys.argv[1] == 'test'
 
 
 # Application definition
@@ -92,6 +86,21 @@ REST_FRAMEWORK = {
         'djangorestframework_camel_case.parser.CamelCaseMultiPartParser',
         'djangorestframework_camel_case.parser.CamelCaseJSONParser',
     ),
+
+    # Nombre de requêtes autorisées par adresse IP sur les endpoints publics
+    # sensibles (ScopedRateThrottle) : freine les essais répétés de PIN,
+    # de code OTP ou de lien d'activation. Assoupli pendant les tests.
+    'DEFAULT_THROTTLE_RATES': {
+        'connexion': '10/min',
+        'otp': '5/min',
+        'activation': '10/min',
+        'inscription': '20/hour',
+    } if not TESTS_EN_COURS else {
+        'connexion': '10000/min',
+        'otp': '10000/min',
+        'activation': '10000/min',
+        'inscription': '10000/min',
+    },
 }
 
 # Configuration de JWT pour la duree de vie des tokens et la rotation des tokens
@@ -249,10 +258,3 @@ PAYDUNYA_CALLBACK_URL = config('PAYDUNYA_CALLBACK_URL', default='')
 PAYDUNYA_RETURN_URL = config('PAYDUNYA_RETURN_URL', default='')
 PAYDUNYA_CANCEL_URL = config('PAYDUNYA_CANCEL_URL', default='')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:4200')
-
-# Firebase Admin SDK
-# Chemin absolu construit depuis BASE_DIR pour fonctionner aussi bien avec
-# runserver qu'avec CRON (qui ne démarre pas depuis le répertoire du projet).
-FIREBASE_CREDENTIALS_PATH = str(
-    BASE_DIR / 'sunugestion' / 'firebase-credentials.json'
-)

@@ -66,3 +66,37 @@ class GieInfosTestCase(TestCase):
         )
 
         self.assertEqual(reponse.status_code, 403)
+
+    def test_nom_avec_balises_refuse(self):
+        self.client.force_authenticate(user=self.president)
+
+        reponse = self.client.patch(
+            '/api/gie/infos/', {'nom': '<script>alert(1)</script>'}, format='json'
+        )
+
+        self.assertEqual(reponse.status_code, 400)
+        self.gie.refresh_from_db()
+        self.assertEqual(self.gie.nom, 'Groupement Alpha')
+
+    def test_telephone_invalide_refuse(self):
+        self.client.force_authenticate(user=self.president)
+
+        for telephone in ('77abc1234', '12345', '7712345678'):
+            reponse = self.client.patch(
+                '/api/gie/infos/', {'telephone': telephone}, format='json'
+            )
+            self.assertEqual(reponse.status_code, 400, telephone)
+
+        self.gie.refresh_from_db()
+        self.assertEqual(self.gie.telephone, '338000000')
+
+    def test_telephone_fixe_mobile_avec_espaces_ou_vide_accepte(self):
+        self.client.force_authenticate(user=self.president)
+
+        for envoye, enregistre in (('77 123 45 67', '771234567'), ('338123456', '338123456'), ('', '')):
+            reponse = self.client.patch(
+                '/api/gie/infos/', {'telephone': envoye}, format='json'
+            )
+            self.assertEqual(reponse.status_code, 200, envoye)
+            self.gie.refresh_from_db()
+            self.assertEqual(self.gie.telephone, enregistre)

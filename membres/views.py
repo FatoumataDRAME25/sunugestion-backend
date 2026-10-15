@@ -5,6 +5,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 
 from authentication.models import DUREE_VALIDITE_INVITATION, Utilisateur
@@ -49,6 +50,13 @@ class MembreViewSet(viewsets.ViewSet):
 
     # Toujours permis, même si l'abonnement du groupement a expiré
     actions_autorisees_en_lecture_seule = {'partial_update', 'changer_pin'}
+
+    def get_throttles(self):
+        # Activation publique par lien : limite les essais de jetons au hasard
+        if self.action == 'activation_publique':
+            self.throttle_scope = 'activation'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_permissions(self):
         if self.action == 'activation_publique':

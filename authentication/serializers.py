@@ -5,7 +5,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import GIE
-from .validators import valider_telephone
+from .validators import valider_nom_gie, valider_telephone, valider_telephone_gie
 import secrets
 from datetime import timedelta
 from django.utils import timezone
@@ -22,11 +22,10 @@ class GIECreationSerializer(serializers.ModelSerializer):
         
 
     def validate_nom(self, valeur):
-        if not valeur.strip():
-            raise serializers.ValidationError(
-                "Le nom du GIE ne peut pas être vide."
-            )
-        return valeur.strip()
+        return valider_nom_gie(valeur)
+
+    def validate_telephone(self, valeur):
+        return valider_telephone_gie(valeur)
 
     def create(self, validated_data):
         # Générer un token d'inscription temporaire
@@ -146,9 +145,6 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         # Générer et envoyer l'OTP
         otp = president.generer_otp()
 
-        print(">>> DESTINATAIRE EMAIL :", president.email)
-        print(">>> ENVOI DE L'EMAIL OTP...")
-
         send_mail(
             subject="Votre code OTP - SunuGestion",
             message=(
@@ -160,8 +156,6 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[president.email],
         )
-
-        print(">>> EMAIL OTP ENVOYÉ")
 
         return president
 
@@ -280,7 +274,7 @@ class ConnexionSerializer(serializers.Serializer):
             utilisateur = Utilisateur.objects.get(telephone=telephone)
         except Utilisateur.DoesNotExist:
             raise serializers.ValidationError(
-                "Numéro de téléphone introuvable."
+                "Numéro de téléphone ou code PIN incorrect."
             )
 
         # Compte suspendu par le président du groupement

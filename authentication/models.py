@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 import secrets
-import random
+from django.core.cache import cache
 from django.utils import timezone
 from datetime import timedelta
 
@@ -152,24 +152,45 @@ class Utilisateur(AbstractBaseUser, PermissionsMixin):
 
 
 
+    # Au-delà de ce nombre d'erreurs, le code OTP est invalidé
+    MAX_ESSAIS_OTP = 5
+
+    def _cle_essais_otp(self):
+        return f"essais_otp_{self.pk}"
+
     def generer_otp(self):
-        """Génère un code OTP à 6 chiffres"""
-        self.otp = str(random.randint(100000, 999999))
+        """Génère un code OTP à 6 chiffres avec un générateur cryptographique"""
+        self.otp = f"{secrets.randbelow(900000) + 100000}"
 
         self.otp_expiration = timezone.now() + timedelta(minutes=10)
         self.save()
+        cache.delete(self._cle_essais_otp())
         return self.otp
 
     def verifier_otp(self, code):
-        """Vérifie que le code OTP est correct et non expiré"""
-        # from django.utils import timezone
+        """Vérifie que le code OTP est correct, non expiré et pas trop essayé"""
+        if not self.otp:
+            return False, "Aucun code en cours. Demandez un nouveau code."
+
         if self.otp != code:
+            essais = cache.get(self._cle_essais_otp(), 0) + 1
+            cache.set(self._cle_essais_otp(), essais, timeout=600)
+
+            if essais >= self.MAX_ESSAIS_OTP:
+                self.otp = None
+                self.otp_expiration = None
+                self.save(update_fields=['otp', 'otp_expiration'])
+                cache.delete(self._cle_essais_otp())
+                return False, "Trop de tentatives. Demandez un nouveau code."
+
             return False, "Code OTP incorrect."
+
         if timezone.now() > self.otp_expiration:
             return False, "Code OTP expiré. Demandez un nouveau code."
         self.otp = None
         self.otp_expiration = None
         self.save()
+        cache.delete(self._cle_essais_otp())
         return True, "Code OTP valide."
 
 

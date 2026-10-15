@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import Notification, NotificationUtilisateur
-from .serializers import FCMTokenSerializer, NotificationListeSerializer
+from .serializers import NotificationListeSerializer
 from .service import compter_non_lues_par_module, marquer_module_comme_lu
 
 # Modules valides extraits des choices du modèle
@@ -11,22 +11,6 @@ MODULES_VALIDES = [choix[0] for choix in Notification.MODULE_CHOICES]
 
 # Nombre maximal de notifications renvoyées par la liste
 LIMITE_LISTE = 50
-
-
-class FCMTokenCreateView(generics.GenericAPIView):
-
-    serializer_class = FCMTokenSerializer
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        fcm_token = serializer.save()
-
-        return Response(
-            FCMTokenSerializer(fcm_token).data,
-            status=status.HTTP_201_CREATED
-        )
 
 
 class BadgesView(generics.GenericAPIView):

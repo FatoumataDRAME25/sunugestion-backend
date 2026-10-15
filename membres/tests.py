@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -828,3 +829,41 @@ class SuppressionInvitationsExpireesTestCase(GestionMembresMixin, TestCase):
 
     def test_rien_a_supprimer(self):
         self.assertIn('aucun compte expiré', self.lancer())
+
+
+class ImportExcelValidationTestCase(GestionMembresMixin, TestCase):
+
+    URL = '/api/membres/membres/analyser-excel/'
+
+    def envoyer(self, contenu, nom='membres.xlsx'):
+        client = APIClient()
+        client.force_authenticate(user=self.president)
+        return client.post(self.URL, {'fichier': SimpleUploadedFile(nom, contenu)}, format='multipart')
+
+    def test_fichier_corrompu_renvoie_400_et_non_500(self):
+        reponse = self.envoyer(b'ceci n est pas un fichier excel')
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('illisible', str(reponse.json()))
+
+    def test_fichier_trop_volumineux_refuse(self):
+        reponse = self.envoyer(b'0' * (5 * 1024 * 1024 + 1))
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('volumineux', str(reponse.json()))
+
+    def test_fichier_valide_toujours_analyse(self):
+        import io
+        import openpyxl
+
+        classeur = openpyxl.Workbook()
+        feuille = classeur.active
+        feuille.append(['prenom', 'nom', 'telephone', 'role'])
+        feuille.append(['Awa', 'Diop', '781234567', 'membre'])
+        tampon = io.BytesIO()
+        classeur.save(tampon)
+
+        reponse = self.envoyer(tampon.getvalue())
+
+        self.assertEqual(reponse.status_code, 200)
+        self.assertEqual(reponse.json()['totalValides'], 1)
