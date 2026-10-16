@@ -95,11 +95,13 @@ REST_FRAMEWORK = {
         'otp': '5/min',
         'activation': '10/min',
         'inscription': '20/hour',
+        'assistant': '20/hour',
     } if not TESTS_EN_COURS else {
         'connexion': '10000/min',
         'otp': '10000/min',
         'activation': '10000/min',
         'inscription': '10000/min',
+        'assistant': '10000/min',
     },
 }
 

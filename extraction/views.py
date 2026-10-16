@@ -20,7 +20,6 @@ from membres.serializers import (
 from .config import settings
 from .n8n_client import send_text_to_n8n
 from .ocr_service import extract_text_from_image
-from .schemas import OCRResult, Person, ProcessDocumentResponse
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/jpg", "image/webp"}
 
@@ -162,31 +161,6 @@ def reserve_au_bureau(vue):
 
 def health(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok"})
-
-
-@csrf_exempt
-@reserve_au_bureau
-def ocr_only(request: HttpRequest) -> JsonResponse:
-    """
-    POST /api/ocr
-    Body : multipart/form-data  { file: <image> }
-    Retourne le texte brut extrait, sans validation des données.
-    """
-    if request.method != "POST":
-        return _error_response("Méthode non autorisée", 405)
-
-    uploaded_file = request.FILES.get("file")
-    if uploaded_file is None:
-        return _error_response("Champ 'file' requis", 400)
-    try:
-        _validate_image(uploaded_file)
-    except ValueError as exc:
-        return _error_response(str(exc), 400)
-
-    result = extract_text_from_image(
-        uploaded_file.read(), lang=settings.paddleocr_lang
-    )
-    return JsonResponse(OCRResult(**result).model_dump())
 
 
 @csrf_exempt

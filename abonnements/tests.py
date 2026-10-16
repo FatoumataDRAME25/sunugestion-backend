@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from authentication.models import GIE, Utilisateur
 from notifications.models import Notification
 
-from .models import Abonnement, PaiementAbonnement
+from .models import PaiementAbonnement
 from .services import (
     calculer_tarif,
     obtenir_abonnement,

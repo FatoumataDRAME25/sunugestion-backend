@@ -1,4 +1,3 @@
-from rest_framework import generics
 from rest_framework.generics import RetrieveAPIView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -130,7 +129,7 @@ class CotisationPaiementView(generics.GenericAPIView):
         if mode_paiement in MODES_ELECTRONIQUES:
             return self._initier_paiement_electronique(cotisation, mode_paiement)
 
-        # ─── Paiement en espèces — comportement inchangé ──────────────────────
+        # ─── Paiement en espèces ──────────────────────────────────────────────
         return self._paiement_especes(request, cotisation, mode_paiement)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -194,7 +193,7 @@ class CotisationPaiementView(generics.GenericAPIView):
         )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Paiement en espèces — comportement original inchangé
+    # Paiement en espèces : enregistré directement dans la caisse
     # ─────────────────────────────────────────────────────────────────────────
 
     @transaction.atomic

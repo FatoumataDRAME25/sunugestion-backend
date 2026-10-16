@@ -1,5 +1,4 @@
 from django.utils import timezone
-from rest_framework.permissions import IsAuthenticated
 from datetime import date
 import calendar
 from django.shortcuts import get_object_or_404
@@ -12,7 +11,7 @@ from django.db import transaction
 from historiques.views import calculer_solde
 from historiques.models import HistoriqueOperation
 from notifications.service import envoyer_notification
-from authentication.permissions import EstMembreGIE, EstPresident, EstPresidentOuTresorier, EstTresorier
+from authentication.permissions import EstMembreGIE, EstPresident, EstTresorier
 from paiements.paydunya_service import (
     creer_facture,
     initier_decaissement,
@@ -461,7 +460,7 @@ class PretDecaissementView(generics.GenericAPIView):
         if mode_paiement in MODES_ELECTRONIQUES:
             return self._initier_decaissement_electronique(pret, mode_paiement)
 
-        # ─── Décaissement en espèces — comportement inchangé ──────────────────
+        # ─── Décaissement en espèces ──────────────────────────────────────────
         return self._decaissement_especes(pret, mode_paiement)
 
     def _verifier_envoi_existant(self, pret):
@@ -564,7 +563,7 @@ class PretDecaissementView(generics.GenericAPIView):
 
     @transaction.atomic
     def _decaissement_especes(self, pret, mode_paiement):
-        """Décaissement en espèces — comportement original inchangé."""
+        """Décaissement en espèces : sortie de caisse immédiate, prêt en cours."""
         pret = Pret.objects.select_for_update().get(pk=pret.pk)
 
         HistoriqueOperation.objects.create(
@@ -638,7 +637,7 @@ class PretRemboursementView(generics.GenericAPIView):
         if mode_paiement in MODES_ELECTRONIQUES:
             return self._initier_remboursement_electronique(pret, mode_paiement)
 
-        # ─── Remboursement en espèces — comportement inchangé ─────────────────
+        # ─── Remboursement en espèces ─────────────────────────────────────────
         return self._remboursement_especes(request, pret, mode_paiement)
 
     def _initier_remboursement_electronique(self, pret, mode_paiement):

@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -18,19 +20,15 @@ from authentication.permissions import (
 from notifications.service import envoyer_notification
 
 from .serializers import (
+    FONCTIONS_UNIQUES,
     AjoutMembreSerializer,
     ImportExcelSerializer,
     MembreSerializer,
 )
 
-ROLES_AUTORISES = ['president', 'tresorier', 'secretaire', 'membre']
+logger = logging.getLogger(__name__)
 
-# Fonctions du bureau occupées par une seule personne à la fois dans un GIE
-# (le président est géré à part, par la passation de présidence)
-FONCTIONS_UNIQUES = {
-    'tresorier': 'trésorier',
-    'secretaire': 'secrétaire',
-}
+ROLES_AUTORISES = ['president', 'tresorier', 'secretaire', 'membre']
 
 
 class MembreViewSet(viewsets.ViewSet):
@@ -233,7 +231,9 @@ class MembreViewSet(viewsets.ViewSet):
     @extend_schema(request=ImportExcelSerializer, responses={200: ImportExcelSerializer})
     @action(detail=False, methods=['post'], url_path='analyser-excel')
     def analyser_excel(self, request):
-        serializer = ImportExcelSerializer(data=request.FILES)
+        serializer = ImportExcelSerializer(
+            data=request.FILES, context={'gie': request.user.gie}
+        )
 
         if serializer.is_valid():
             membres_valides, membres_invalides = serializer.analyser()
@@ -274,11 +274,13 @@ class MembreViewSet(viewsets.ViewSet):
         # Suivre les téléphones déjà vus dans ce batch pour éviter
         # un crash PostgreSQL si deux lignes ont le même numéro
         telephones_du_batch = set()
+        # Trésorier / secrétaire déjà attribués plus haut dans le fichier
+        roles_du_batch = set()
 
         for index, item in enumerate(membres_valides):
             serializer = AjoutMembreSerializer(
                 data=item,
-                context={'gie': request.user.gie}
+                context={'gie': request.user.gie, 'roles_deja_pris': roles_du_batch}
             )
             if serializer.is_valid():
                 telephone = serializer.validated_data.get('telephone')
@@ -295,6 +297,8 @@ class MembreViewSet(viewsets.ViewSet):
                     continue
 
                 telephones_du_batch.add(telephone)
+                if serializer.validated_data.get('role') in FONCTIONS_UNIQUES:
+                    roles_du_batch.add(serializer.validated_data['role'])
 
                 # Générer le token d'invitation sans appeler save()
                 # (même mécanique que generer_token_invitation() mais sans persister)
@@ -322,9 +326,10 @@ class MembreViewSet(viewsets.ViewSet):
             try:
                 with transaction.atomic():
                     Utilisateur.objects.bulk_create(utilisateurs_a_creer)
-            except Exception as exc:
+            except Exception:
+                logger.exception("Import de membres : échec de l'enregistrement")
                 return Response(
-                    {'erreur': f"Erreur lors de l'import : {str(exc)}"},
+                    {'erreur': "L'import n'a pas pu être enregistré. Réessayez."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
@@ -437,7 +442,10 @@ class MembreViewSet(viewsets.ViewSet):
                 )
 
             membre.role = nouveau_role
-            membre.save(update_fields=['role'])
+            # Les fonctions adjointes sont réservées aux membres simples
+            if nouveau_role != 'membre':
+                membre.fonction_bureau = ''
+            membre.save(update_fields=['role', 'fonction_bureau'])
 
         return Response(
             {
@@ -549,10 +557,13 @@ class MembreViewSet(viewsets.ViewSet):
                 )
 
             nouveau.role = 'president'
-            nouveau.save(update_fields=['role'])
+            nouveau.fonction_bureau = ''
+            nouveau.save(update_fields=['role', 'fonction_bureau'])
 
             ancien.role = role_ancien
-            ancien.save(update_fields=['role'])
+            if role_ancien != 'membre':
+                ancien.fonction_bureau = ''
+            ancien.save(update_fields=['role', 'fonction_bureau'])
 
         return Response(
             {
@@ -597,6 +608,18 @@ class MembreViewSet(viewsets.ViewSet):
                     'erreur': (
                         "Fonction invalide. Valeurs autorisées : "
                         f"{', '.join(fonctions)} ou une valeur vide pour la retirer."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if fonction and membre.role != 'membre':
+            return Response(
+                {
+                    'erreur': (
+                        "Les fonctions adjointes sont réservées aux membres "
+                        "simples : le président, le trésorier et le secrétaire "
+                        "occupent déjà un poste du bureau."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST
@@ -802,7 +825,9 @@ class MembreViewSet(viewsets.ViewSet):
 
         membre.statut = 'inactif'
         membre.is_active = False
-        membre.save(update_fields=['statut', 'is_active'])
+        # Un membre suspendu ne peut pas occuper une fonction du bureau
+        membre.fonction_bureau = ''
+        membre.save(update_fields=['statut', 'is_active', 'fonction_bureau'])
 
         return Response(
             {
@@ -858,7 +883,7 @@ class MembreViewSet(viewsets.ViewSet):
         )
 
     # ──────────────────────────────────────────────────────
-    # 11. CHANGER SON CODE PIN
+    # 10. CHANGER SON CODE PIN
     # POST /api/membres/changer-pin/
     # Accès : tout membre GIE (EstMembreGIE)
     # ──────────────────────────────────────────────────────
@@ -909,7 +934,7 @@ class MembreViewSet(viewsets.ViewSet):
         )
 
     # ──────────────────────────────────────────────────────
-    # 10. ACTIVATION DE COMPTE (lien d'invitation)
+    # 11. ACTIVATION DE COMPTE (lien d'invitation)
     # POST /api/membres/activation-compte/
     # Accès : public (AllowAny)
     # ──────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
-from activites.models import Activite, Presence
+from activites.models import Activite
 from cotisations.models import Cotisation
 from historiques.models import HistoriqueOperation
 from prets.models import Pret

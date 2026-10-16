@@ -27,22 +27,21 @@ class AccesOcrTestCase(TestCase):
         return client
 
     def test_refuse_sans_connexion(self):
-        for url in ('/api/ocr', '/api/process-document'):
-            with self.subTest(url=url):
-                self.assertEqual(self.client_avec_jeton().post(url, {}, format='multipart').status_code, 401)
-                self.assertEqual(
-                    self.client_avec_jeton(jeton='jeton-invalide').post(url, {}, format='multipart').status_code,
-                    401
-                )
+        url = '/api/process-document'
+        self.assertEqual(self.client_avec_jeton().post(url, {}, format='multipart').status_code, 401)
+        self.assertEqual(
+            self.client_avec_jeton(jeton='jeton-invalide').post(url, {}, format='multipart').status_code,
+            401
+        )
 
     def test_refuse_pour_un_membre_simple(self):
-        reponse = self.client_avec_jeton(self.membre).post('/api/ocr', {}, format='multipart')
+        reponse = self.client_avec_jeton(self.membre).post('/api/process-document', {}, format='multipart')
         self.assertEqual(reponse.status_code, 403)
 
     def test_secretaire_autorise(self):
         # Sans fichier : la requête est acceptée puis refusée pour le champ manquant,
         # sans lancer l'analyse d'image
-        reponse = self.client_avec_jeton(self.secretaire).post('/api/ocr', {}, format='multipart')
+        reponse = self.client_avec_jeton(self.secretaire).post('/api/process-document', {}, format='multipart')
         self.assertEqual(reponse.status_code, 400)
         self.assertIn('file', reponse.json()['detail'])
 

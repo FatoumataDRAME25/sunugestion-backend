@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from .models import Activite, Presence
+from .models import Activite
 
 Utilisateur = get_user_model()
 
@@ -85,21 +85,3 @@ class PresenceItemSerializer(serializers.Serializer):
 
 class EnregistrerPresenceSerializer(serializers.Serializer):
     presences = PresenceItemSerializer(many=True)
-
-
-class PresenceSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = Presence
-
-        fields = [
-            'id',
-            'activite',
-            'utilisateur',
-            'statut',
-        ]
-
-        read_only_fields = [
-            'id',
-            'activite'
-        ]

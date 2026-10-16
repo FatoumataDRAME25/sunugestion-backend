@@ -27,6 +27,43 @@ def valider_role(role):
     return role, []
 
 
+# Fonctions du bureau occupées par une seule personne à la fois dans un GIE
+# (le président est géré à part, par la passation de présidence)
+FONCTIONS_UNIQUES = {
+    'tresorier': 'trésorier',
+    'secretaire': 'secrétaire',
+}
+
+
+def erreur_role_nouveau_membre(gie, role, roles_deja_pris=()):
+    """
+    Rôle d'un membre ajouté ou importé :
+    - président : jamais, la présidence se transmet par passation ;
+    - trésorier, secrétaire : seulement si le poste est libre.
+    `roles_deja_pris` : fonctions déjà attribuées plus haut dans le même fichier.
+    Retourne le message d'erreur, ou None si le rôle est accepté.
+    """
+    if role == 'president':
+        return (
+            "Le rôle président ne peut pas être attribué à un nouveau membre. "
+            "La présidence se transmet depuis la fiche d'un membre."
+        )
+
+    if role in FONCTIONS_UNIQUES:
+        libelle = FONCTIONS_UNIQUES[role]
+        if role in roles_deja_pris:
+            return f"Le fichier contient plusieurs {libelle}s : un seul est possible."
+
+        occupant = Utilisateur.objects.filter(gie=gie, role=role).first()
+        if occupant:
+            return (
+                f"Le GIE a déjà un {libelle} ({occupant.prenom} {occupant.nom}). "
+                f"Ajoutez ce membre comme membre simple."
+            )
+
+    return None
+
+
 def valider_nom_prenom(valeur, champ):
     """Vérifie qu'un nom ou prénom contient uniquement des caractères valides."""
     valeur = str(valeur).strip()
@@ -66,6 +103,14 @@ class AjoutMembreSerializer(serializers.Serializer):
 
     def validate_nom(self, valeur):
         return valider_nom_prenom(valeur, "nom")
+
+    def validate_role(self, valeur):
+        erreur = erreur_role_nouveau_membre(
+            self.context['gie'], valeur, self.context.get('roles_deja_pris', ())
+        )
+        if erreur:
+            raise serializers.ValidationError(erreur)
+        return valeur
 
     def create(self, validated_data):
 
@@ -136,6 +181,8 @@ class ImportExcelSerializer(serializers.Serializer):
 
         membres_valides = []
         membres_invalides = []
+        gie = self.context.get('gie')
+        roles_du_fichier = set()
 
         # Récupération des colonnes
         headers = [
@@ -198,6 +245,13 @@ class ImportExcelSerializer(serializers.Serializer):
             else:
                 role, erreurs_role = valider_role(role)
                 erreurs_ligne.extend(erreurs_role)
+
+                if not erreurs_role and gie is not None:
+                    erreur = erreur_role_nouveau_membre(gie, role, roles_du_fichier)
+                    if erreur:
+                        erreurs_ligne.append(erreur)
+                    elif role in FONCTIONS_UNIQUES:
+                        roles_du_fichier.add(role)
 
             membre = {
                 'ligne': numero_ligne,

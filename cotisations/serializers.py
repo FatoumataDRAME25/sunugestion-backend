@@ -1,5 +1,4 @@
 from django.db import transaction
-from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from .models import SessionCotisation, Cotisation

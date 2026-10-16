@@ -867,3 +867,121 @@ class ImportExcelValidationTestCase(GestionMembresMixin, TestCase):
 
         self.assertEqual(reponse.status_code, 200)
         self.assertEqual(reponse.json()['totalValides'], 1)
+
+
+class RolesNouveauMembreTestCase(GestionMembresMixin, TestCase):
+    """Un ajout ou un import ne peut ni créer un président ni doubler un poste du bureau."""
+
+    AJOUTER = '/api/membres/membres/ajouter/'
+    IMPORTER = '/api/membres/membres/importer/'
+
+    def nouveau(self, telephone, role):
+        return {'prenom': 'Nouveau', 'nom': 'Venu', 'telephone': telephone, 'role': role}
+
+    def test_secretaire_ne_peut_pas_ajouter_un_president(self):
+        reponse = self.appeler(self.secretaire, 'post', self.AJOUTER, self.nouveau('781000001', 'president'))
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('role', reponse.json())
+        self.assertEqual(self.roles(self.gie, 'president'), 1)
+
+    def test_poste_occupe_refuse_membre_simple_accepte(self):
+        for role in ('tresorier', 'secretaire'):
+            reponse = self.appeler(self.president, 'post', self.AJOUTER, self.nouveau('781000002', role))
+            self.assertEqual(reponse.status_code, 400, role)
+            self.assertEqual(self.roles(self.gie, role), 1)
+
+        reponse = self.appeler(self.secretaire, 'post', self.AJOUTER, self.nouveau('781000003', 'membre'))
+        self.assertEqual(reponse.status_code, 201)
+
+    def test_poste_libre_accepte_une_seule_fois_dans_un_import(self):
+        # Le groupement Beta n'a ni trésorier ni secrétaire
+        reponse = self.appeler(self.president_beta, 'post', self.IMPORTER, {'membres': [
+            self.nouveau('781000011', 'tresorier'),
+            self.nouveau('781000012', 'tresorier'),
+            self.nouveau('781000013', 'president'),
+            self.nouveau('781000014', 'membre'),
+        ]})
+
+        self.assertEqual(reponse.status_code, 201)
+        self.assertEqual(self.roles(self.autre_gie, 'tresorier'), 1)
+        self.assertEqual(self.roles(self.autre_gie, 'president'), 1)
+        self.assertEqual(reponse.json()['totalEchoues'], 2)
+        self.assertTrue(Utilisateur.objects.filter(telephone='781000014').exists())
+
+    def test_analyse_excel_signale_les_roles_refuses(self):
+        import io
+        import openpyxl
+
+        classeur = openpyxl.Workbook()
+        feuille = classeur.active
+        feuille.append(['prenom', 'nom', 'telephone', 'role'])
+        feuille.append(['Awa', 'Diop', '781000021', 'president'])
+        feuille.append(['Moussa', 'Fall', '781000022', 'tresorier'])
+        feuille.append(['Fatou', 'Sow', '781000023', 'membre'])
+        tampon = io.BytesIO()
+        classeur.save(tampon)
+
+        client = APIClient()
+        client.force_authenticate(user=self.secretaire)
+        reponse = client.post(
+            '/api/membres/membres/analyser-excel/',
+            {'fichier': SimpleUploadedFile('membres.xlsx', tampon.getvalue())},
+            format='multipart'
+        )
+
+        self.assertEqual(reponse.status_code, 200)
+        donnees = reponse.json()
+        self.assertEqual(donnees['totalValides'], 1)
+        self.assertEqual(donnees['totalInvalides'], 2)
+
+
+class FonctionsReserveesAuxMembresSimplesTestCase(GestionMembresMixin, TestCase):
+    """Vice-président et adjoints : membres simples actifs uniquement."""
+
+    def fonction(self, cible, valeur):
+        return self.appeler(self.president, 'patch', f'{BASE}{cible.id}/modifier-fonction/', {'fonctionBureau': valeur})
+
+    def recharger(self, membre):
+        membre.refresh_from_db()
+        return membre
+
+    def test_titulaire_d_un_role_ne_recoit_pas_de_fonction(self):
+        self.assertEqual(self.fonction(self.tresorier, 'tresorier_adjoint').status_code, 400)
+        self.assertEqual(self.fonction(self.president, 'vice_president').status_code, 400)
+        self.assertEqual(self.recharger(self.tresorier).fonction_bureau, '')
+        self.assertEqual(self.fonction(self.membre, 'vice_president').status_code, 200)
+
+    def test_suspension_retire_la_fonction(self):
+        self.fonction(self.membre, 'vice_president')
+
+        self.appeler(self.president, 'patch', f'{BASE}{self.membre.id}/suspendre/')
+
+        membre = self.recharger(self.membre)
+        self.assertEqual(membre.statut, 'inactif')
+        self.assertEqual(membre.fonction_bureau, '')
+
+    def test_changement_de_role_retire_la_fonction(self):
+        self.fonction(self.membre2, 'secretaire_adjoint')
+        # Libère le poste de secrétaire puis le confie au secrétaire adjoint
+        self.appeler(self.president, 'patch', f'{BASE}{self.secretaire.id}/modifier-role/', {'role': 'membre'})
+
+        reponse = self.appeler(self.president, 'patch', f'{BASE}{self.membre2.id}/modifier-role/', {'role': 'secretaire'})
+
+        self.assertEqual(reponse.status_code, 200)
+        membre2 = self.recharger(self.membre2)
+        self.assertEqual(membre2.role, 'secretaire')
+        self.assertEqual(membre2.fonction_bureau, '')
+
+    def test_nouveau_president_perd_sa_fonction(self):
+        self.fonction(self.membre, 'vice_president')
+
+        reponse = self.appeler(
+            self.president, 'patch', f'{BASE}{self.membre.id}/modifier-role/',
+            {'role': 'president', 'roleAncienPresident': 'membre'}
+        )
+
+        self.assertEqual(reponse.status_code, 200)
+        membre = self.recharger(self.membre)
+        self.assertEqual(membre.role, 'president')
+        self.assertEqual(membre.fonction_bureau, '')

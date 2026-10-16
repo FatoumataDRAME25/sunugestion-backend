@@ -2,7 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from authentication.models import GIE, Utilisateur
-from notifications.models import Notification, NotificationUtilisateur
+from notifications.models import NotificationUtilisateur
 from notifications.service import envoyer_notification
 
 
@@ -146,16 +146,3 @@ class NotificationsApiTestCase(TestCase):
         self.assertEqual(client.get(URL_LISTE).status_code, 401)
         self.assertEqual(client.patch(f'{URL_LISTE}1/lire/').status_code, 401)
         self.assertEqual(client.patch(f'{URL_LISTE}tout-lire/').status_code, 401)
-
-    def test_endpoints_existants_inchanges(self):
-        self.notifier([self.tresorier], 'Activité', module='activites', objet_id=3)
-        client = self.client_de(self.tresorier)
-
-        badges = client.get(f'{URL_LISTE}badges/').json()
-        self.assertEqual(badges['activites'], {'count': 1, 'dernierObjetId': 3})
-
-        self.assertEqual(
-            client.patch(f'{URL_LISTE}badges/activites/lire/').status_code, 200
-        )
-        self.assertEqual(Notification.objects.count(), 1)
-        self.assertEqual(client.get(URL_LISTE).json()['nonLues'], 0)

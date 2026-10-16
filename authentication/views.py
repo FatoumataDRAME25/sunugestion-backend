@@ -2,7 +2,6 @@ from django.utils import timezone
 
 from dateutil.relativedelta import relativedelta
 from django.db.models.aggregates import Count
-from django.shortcuts import render
 from drf_spectacular.utils import extend_schema
 
 from rest_framework.views import APIView
@@ -209,7 +208,7 @@ class RenvoyerOTPView(APIView):
         serializer = RenvoyerOTPSerializer(data=request.data)
 
         if serializer.is_valid():
-            president = serializer.save()
+            serializer.save()
 
             return Response({
                 'message': 'Un nouveau code OTP a été envoyé à votre adresse e-mail.'

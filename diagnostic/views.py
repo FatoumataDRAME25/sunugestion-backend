@@ -1,14 +1,41 @@
+import hashlib
+import json
+
 from asgiref.sync import async_to_sync
+from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.throttling import ScopedRateThrottle
 
 from authentication.permissions import MESSAGE_GIE_DESACTIVE
 
 from .calculs import calculer_indicateurs
 from .ia_diagnostic import analyser_diagnostic
 from .ia_chatbot import repondre_question
+
+# Analyse IA réutilisée pendant 30 minutes tant que les chiffres ne changent pas
+DUREE_CACHE_ANALYSE = 30 * 60
+
+
+def _analyse_ia_en_cache(gie, indicateurs):
+    """
+    Appelle l'IA seulement si l'analyse de ces indicateurs n'est pas en cache.
+    Une nouvelle opération change les indicateurs, donc la clé : l'analyse est
+    alors refaite. Une réponse « indisponible » n'est jamais mise en cache.
+    """
+    empreinte = hashlib.sha256(
+        json.dumps(indicateurs, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+    cle = f"diagnostic_ia_{gie.id}_{empreinte}"
+
+    analyse = cache.get(cle)
+    if analyse is None:
+        analyse = async_to_sync(analyser_diagnostic)(indicateurs)
+        if analyse.get('disponible'):
+            cache.set(cle, analyse, DUREE_CACHE_ANALYSE)
+    return analyse
 
 
 class DiagnosticAPIView(APIView):
@@ -20,10 +47,8 @@ class DiagnosticAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # 1. Récupérer le groupement de l'utilisateur connecté
         gie = getattr(request.user, 'gie', None)
 
-        # 2. Refuser l'accès si aucun groupement n'est associé
         if gie is None:
             return Response(
                 {
@@ -39,13 +64,11 @@ class DiagnosticAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # 3. Calculer les indicateurs financiers
         indicateurs = calculer_indicateurs(gie)
 
-        # 4. Appeler l'analyse IA asynchrone depuis la vue synchrone
-        analyse_ia = async_to_sync(analyser_diagnostic)(indicateurs)
+        analyse_ia = _analyse_ia_en_cache(gie, indicateurs)
 
-        # 5. Retourner les indicateurs même si l'IA est indisponible
+        # Retourner les indicateurs même si l'IA est indisponible
         resultat = {
             'indicateurs': indicateurs,
             'intelligenceArtificielle': analyse_ia,
@@ -64,9 +87,11 @@ class AssistantChatAPIView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    # Chaque question est un appel payant au service IA
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'assistant'
 
     def post(self, request):
-        # 1. Vérifier que l'utilisateur appartient à un groupement
         gie = getattr(request.user, 'gie', None)
 
         if gie is None:
@@ -84,7 +109,6 @@ class AssistantChatAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # 2. Récupérer et valider la question
         question = request.data.get('question')
 
         if not isinstance(question, str):
@@ -116,16 +140,13 @@ class AssistantChatAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 3. Calculer les indicateurs du groupement connecté
         indicateurs = calculer_indicateurs(gie)
 
-        # 4. Interroger l'assistant IA
         resultat = async_to_sync(repondre_question)(
             question,
             indicateurs
         )
 
-        # 5. Gérer l'indisponibilité du service IA
         if not resultat.get('disponible'):
             return Response(
                 {
@@ -137,7 +158,6 @@ class AssistantChatAPIView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        # 6. Retourner la réponse au frontend
         return Response(
             {
                 'reponse': resultat['reponse']

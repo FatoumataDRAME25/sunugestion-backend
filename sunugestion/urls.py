@@ -22,7 +22,6 @@ urlpatterns = [
 
     # OCR / extraction
     path('ocr/health', extraction_views.health, name='ocr-health'),
-    path('api/ocr', extraction_views.ocr_only, name='ocr-only'),
     path('api/process-document', extraction_views.process_document, name='process-document'),
 
     # Endpoint de téléchargement du schéma JSON/YAML
