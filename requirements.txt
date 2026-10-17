@@ -37,6 +37,7 @@ Flask==3.1.3
 flask-babel==4.0.0
 fonttools==4.65.0
 future==1.0.0
+gunicorn==23.0.0
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -114,3 +115,4 @@ uritemplate==4.2.0
 urllib3==2.8.0
 visualdl==2.5.3
 Werkzeug==3.1.8
+whitenoise==6.9.0

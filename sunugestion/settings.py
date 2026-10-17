@@ -14,6 +14,7 @@ from datetime import timedelta
 from pathlib import Path
 from decouple import Csv, config
 
+import mimetypes
 import os
 import sys
 
@@ -26,6 +27,10 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 # Noms de domaine acceptés, séparés par des virgules dans le .env
 # (ex. ALLOWED_HOSTS=sunugestion.sn,api.sunugestion.sn).
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+# Adresses https d'où l'admin Django peut être utilisé derrière un intermédiaire
+# (domaine du serveur au déploiement). Jamais l'adresse ngrok : l'admin n'y est
+# pas exposé (voir nginx.conf)
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
 
 # Exécution des tests automatiques (python manage.py test)
 TESTS_EN_COURS = len(sys.argv) > 1 and sys.argv[1] == 'test'
@@ -66,6 +71,10 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = 'authentication.Utilisateur'
 
 REST_FRAMEWORK = {
+    # Derrière nginx (Docker), l'adresse du client est lue dans X-Forwarded-For :
+    # sinon tous les utilisateurs partageraient les mêmes limites de connexion.
+    # Non défini en développement : adresse directe du client.
+    'NUM_PROXIES': config('NUM_PROXIES', default=None, cast=lambda v: int(v) if v else None),
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
@@ -125,6 +134,8 @@ SPECTACULAR_SETTINGS = {
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Sert les fichiers statiques (admin, Swagger) sous gunicorn, sans nginx dédié
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -222,12 +233,17 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# Rempli par `collectstatic` au démarrage du conteneur
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Logos enregistrés en WebP : type absent de la table du système dans l'image
+# Docker, sinon servi en application/octet-stream par Django (développement)
+mimetypes.add_type('image/webp', '.webp')
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
