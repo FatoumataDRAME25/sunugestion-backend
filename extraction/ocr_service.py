@@ -1,9 +1,17 @@
 import io
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from paddleocr import PaddleOCR
+
+
+# PaddlePaddle refuse qu'un moteur créé dans un fil d'exécution soit utilisé
+# depuis un autre (« could not execute a primitive »). Le serveur traite chaque
+# requête dans un fil différent : toutes les analyses passent donc par un fil
+# unique, qui crée le moteur et reste le seul à s'en servir.
+_fil_ocr = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ocr")
 
 
 @lru_cache(maxsize=1)
@@ -12,6 +20,10 @@ def get_ocr_engine(lang: str = "fr") -> PaddleOCR:
 
 
 def extract_text_from_image(image_bytes: bytes, lang: str = "fr") -> dict:
+    return _fil_ocr.submit(_extraire_texte, image_bytes, lang).result()
+
+
+def _extraire_texte(image_bytes: bytes, lang: str) -> dict:
     ocr_engine = get_ocr_engine(lang)
 
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
