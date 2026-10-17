@@ -18,7 +18,9 @@ class GIECreationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GIE
-        fields = ['id','nom', 'region', 'type_gie', 'telephone', 'photo']
+        fields = ['id','nom', 'region', 'type_gie', 'telephone', 'logo']
+        # Le logo s'envoie après l'inscription, par /api/gie/infos/ (fichier vérifié)
+        read_only_fields = ['logo']
         
 
     def validate_nom(self, valeur):
@@ -50,13 +52,14 @@ class GIESerializer(serializers.ModelSerializer):
             'region',
             'type_gie',
             'telephone',
-            'photo',
+            'logo',
             'code',
             'date_creation',
             'statut',
             'nombre_membres'
         ]
-        read_only_fields = ['id', 'code', 'date_creation']
+        # logo : modifiable uniquement par /api/gie/infos/ (fichier vérifié)
+        read_only_fields = ['id', 'code', 'date_creation', 'logo']
 
     def get_nombre_membres(self, gie):
         return gie.membres.count()

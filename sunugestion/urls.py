@@ -1,4 +1,6 @@
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
@@ -33,3 +35,8 @@ urlpatterns = [
     # Alternative (Redoc) :
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
+
+# Logos envoyés : servis par Django en développement uniquement ;
+# en production (DEBUG=False), nginx les sert directement depuis le volume
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

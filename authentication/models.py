@@ -4,6 +4,14 @@ import secrets
 from django.core.cache import cache
 from django.utils import timezone
 from datetime import timedelta
+import uuid
+
+
+def chemin_logo_gie(gie, nom_fichier):
+    """Nom aléatoire : ni collision, ni nom d'origine conservé, et une nouvelle
+    adresse à chaque changement (le navigateur ne garde pas l'ancien logo en cache)."""
+    return f'gie/logos/{uuid.uuid4().hex}.webp'
+
 
 class GIE(models.Model):
 
@@ -30,7 +38,7 @@ class GIE(models.Model):
     region = models.CharField(max_length=100)
     type_gie = models.CharField(max_length=50, choices=type_CHOICES)
     telephone = models.CharField(max_length=20, null=True, blank=True) 
-    photo = models.ImageField(upload_to='gie/photos/', null=True, blank=True)
+    logo = models.ImageField(upload_to=chemin_logo_gie, null=True, blank=True)
     code = models.CharField(max_length=50, unique=True)
     date_creation = models.DateTimeField(auto_now_add=True)
     statut = models.CharField(
