@@ -631,7 +631,7 @@ class CotisationsMembreTestCase(GestionMembresMixin, TestCase):
 
         def session(libelle, montant, debut, fin):
             return SessionCotisation.objects.create(
-                createur=self.tresorier, libelle=libelle, montant=montant,
+                createur=self.tresorier, gie=self.tresorier.gie, libelle=libelle, montant=montant,
                 date_debut=debut, date_fin=fin
             )
 

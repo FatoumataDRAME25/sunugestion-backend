@@ -36,7 +36,7 @@ class SessionCotisationCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         return SessionCotisation.objects.filter(
-            createur__gie=self.request.user.gie
+            gie=self.request.user.gie
         ).annotate(
             # Compteurs pour les indicateurs du serializer (une seule requête)
             nb_cotisations=Count('cotisations', distinct=True),
@@ -77,7 +77,7 @@ class CotisationListView(generics.ListAPIView):
         # Uniquement une session du groupement de l'utilisateur
         return Cotisation.objects.filter(
             session_id=session_id,
-            session__createur__gie=self.request.user.gie
+            session__gie=self.request.user.gie
         )
 
 

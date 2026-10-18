@@ -83,11 +83,12 @@ class SessionCotisationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # createur est injecté par perform_create via serializer.save(createur=...)
         createur = validated_data.pop('createur')
+        gie = createur.gie
         session = SessionCotisation.objects.create(
+            gie=gie,
             createur=createur,
             **validated_data
         )
-        gie = createur.gie
         membres_actifs = gie.membres.filter(statut='actif')
 
         cotisations = []

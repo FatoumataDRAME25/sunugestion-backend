@@ -319,7 +319,7 @@ class CotisationsTestCase(DonneesRapportMixin, TestCase):
 
     def creer_session(self, date_debut, date_fin, montant=5000):
         return SessionCotisation.objects.create(
-            createur=self.tresorier,
+            createur=self.tresorier, gie=self.tresorier.gie,
             libelle='Session de test',
             montant=montant,
             date_debut=date_debut,
@@ -395,7 +395,7 @@ class CotisationsTestCase(DonneesRapportMixin, TestCase):
 
         # Autre groupement
         session_beta = SessionCotisation.objects.create(
-            createur=self.president_beta, libelle='Beta', montant=9000,
+            createur=self.president_beta, gie=self.president_beta.gie, libelle='Beta', montant=9000,
             date_debut=date(2024, 2, 1), date_fin=date(2024, 2, 15)
         )
         Cotisation.objects.create(

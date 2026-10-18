@@ -33,7 +33,7 @@ class IndicateursSessionsTestCase(TestCase):
         cls.tresorier_beta = creer(cls.autre_gie, '770000011', 'tresorier')
 
         cls.session = SessionCotisation.objects.create(
-            createur=cls.tresorier, libelle='Octobre', montant=5000,
+            createur=cls.tresorier, gie=cls.tresorier.gie, libelle='Octobre', montant=5000,
             date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
         )
         Cotisation.objects.create(session=cls.session, membre=cls.tresorier, statut='paye')
@@ -41,7 +41,7 @@ class IndicateursSessionsTestCase(TestCase):
         Cotisation.objects.create(session=cls.session, membre=cls.membre2, statut='en_cours')
 
         SessionCotisation.objects.create(
-            createur=cls.tresorier_beta, libelle='Beta', montant=9000,
+            createur=cls.tresorier_beta, gie=cls.tresorier_beta.gie, libelle='Beta', montant=9000,
             date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
         )
 
@@ -88,6 +88,39 @@ class IndicateursSessionsTestCase(TestCase):
             Cotisation.objects.filter(session__libelle='Novembre').count(), 3
         )
 
+    def test_session_rattachee_au_groupement_du_createur(self):
+        client = APIClient()
+        client.force_authenticate(user=self.tresorier)
+
+        reponse = client.post(
+            '/api/cotisations/sessions/',
+            {
+                'libelle': 'Décembre', 'montant': 2000,
+                'dateDebut': '2026-12-01', 'dateFin': '2026-12-31',
+                # Tentative de créer la session dans un autre groupement : ignorée
+                'gie': self.autre_gie.id,
+            },
+            format='json'
+        )
+
+        self.assertEqual(reponse.status_code, 201)
+        self.assertEqual(SessionCotisation.objects.get(libelle='Décembre').gie, self.gie)
+
+    def test_session_reste_dans_son_groupement_si_le_createur_le_quitte(self):
+        # Le créateur change de groupement : la session reste visible dans
+        # l'ancien, avec ses cotisations, et n'apparaît pas dans le nouveau
+        self.tresorier.gie = self.autre_gie
+        self.tresorier.save(update_fields=['gie'])
+        client = APIClient()
+
+        client.force_authenticate(user=self.membre)
+        self.assertIn('Octobre', [s['libelle'] for s in client.get('/api/cotisations/sessions/').json()])
+        reponse = client.get(f'/api/cotisations/sessions/{self.session.id}/cotisations/')
+        self.assertEqual(reponse.status_code, 200)
+
+        client.force_authenticate(user=self.tresorier_beta)
+        self.assertNotIn('Octobre', [s['libelle'] for s in client.get('/api/cotisations/sessions/').json()])
+
 
 class CloisonnementCotisationsTestCase(TestCase):
 
@@ -107,11 +140,11 @@ class CloisonnementCotisationsTestCase(TestCase):
         cls.membre_beta = creer(cls.autre_gie, '770000012', 'membre')
 
         cls.session = SessionCotisation.objects.create(
-            createur=cls.tresorier, libelle='Alpha', montant=5000,
+            createur=cls.tresorier, gie=cls.tresorier.gie, libelle='Alpha', montant=5000,
             date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
         )
         cls.session_beta = SessionCotisation.objects.create(
-            createur=cls.tresorier_beta, libelle='Beta', montant=5000,
+            createur=cls.tresorier_beta, gie=cls.tresorier_beta.gie, libelle='Beta', montant=5000,
             date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
         )
         cls.cotisation = Cotisation.objects.create(session=cls.session, membre=cls.membre)
