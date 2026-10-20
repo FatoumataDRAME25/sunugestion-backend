@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from .models import Activite, Presence
 from .serializers import ActiviteSerializer, EnregistrerPresenceSerializer
@@ -35,6 +36,25 @@ class ActiviteViewSet(viewsets.ModelViewSet):
         return Activite.objects.filter(
             gie=self.request.user.gie
         ).order_by('-date_activite')
+
+    def update(self, request, *args, **kwargs):
+        # Une activité terminée ou annulée fait partie de l'historique
+        # (compte rendu, présences, rapports) : elle n'est plus modifiable.
+        activite = self.get_object()
+        if activite.statut in ('terminee', 'annulee'):
+            return Response(
+                {'message': "Une activité terminée ou annulée ne peut plus être modifiée."},
+                status=400
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if self.get_object().statut == 'terminee':
+            return Response(
+                {'message': "Une activité terminée ne peut pas être supprimée."},
+                status=400
+            )
+        return super().destroy(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         activite = serializer.save(

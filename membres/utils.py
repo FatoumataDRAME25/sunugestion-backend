@@ -8,6 +8,10 @@ le même mécanisme.
 Quand Africa's Talking sera intégré, seul ce fichier devra être modifié.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def envoyer_invitation(utilisateur) -> None:
     """
@@ -19,14 +23,13 @@ def envoyer_invitation(utilisateur) -> None:
     Paramètres :
     - utilisateur : instance Utilisateur avec token_invitation renseigné
     """
-    lien = f"http://localhost:4200/activation?token={utilisateur.token_invitation}"
+    # Le lien d'activation donne accès au compte : il n'est jamais écrit dans
+    # les journaux. Le président l'envoie par WhatsApp depuis l'application.
+    logger.info(
+        "Invitation prête pour le membre %s (envoi par SMS non configuré).",
+        utilisateur.id,
+    )
 
-    # ── Simulation SMS (à remplacer par Africa's Talking) ──────────────────
-    print("\n" + "=" * 60)
-    print(f"📱 [SIMULATION SMS] Envoyé au {utilisateur.telephone}")
-    print(f"Message : Bienvenue sur SunuGestion ! Activez votre compte ici : {lien}")
-    print("=" * 60 + "\n")
-
-    # TODO : remplacer le bloc ci-dessus par l'appel Africa's Talking :
-    # from africastalking import SMS
+    # TODO : envoi par SMS via Africa's Talking, par exemple :
+    # lien = f"{settings.APP_URL}/activation?token={utilisateur.token_invitation}"
     # SMS.send(message=f"Activez votre compte : {lien}", recipients=[f"+221{utilisateur.telephone}"])

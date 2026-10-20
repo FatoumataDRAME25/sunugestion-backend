@@ -72,34 +72,3 @@ class NotificationUtilisateur(models.Model):
         verbose_name_plural = "Notifications utilisateurs"
         db_table = "notification_utilisateur"
         unique_together = ['notification', 'utilisateur']
-
-
-class FCMToken(models.Model):
-    """
-    Token Firebase Cloud Messaging d'un appareil ou navigateur.
-    Un utilisateur peut en avoir plusieurs (PC, téléphone, tablette).
-    """
-
-    utilisateur = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='fcm_tokens'
-    )
-    token = models.TextField(unique=True)
-    # Token fourni par Firebase SDK côté Angular
-
-    appareil = models.CharField(max_length=100, blank=True)
-    # Libellé libre : "Chrome - PC", "Firefox - Mobile", etc.
-    # Optionnel mais utile pour déboguer
-
-    date_creation = models.DateTimeField(auto_now_add=True)
-    date_mise_a_jour = models.DateTimeField(auto_now=True)
-    # auto_now permet de détecter les tokens potentiellement expirés
-
-    def __str__(self):
-        return f"{self.utilisateur} — {self.appareil or 'Appareil inconnu'}"
-
-    class Meta:
-        verbose_name = "Token FCM"
-        verbose_name_plural = "Tokens FCM"
-        db_table = "fcm_token"

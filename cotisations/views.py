@@ -1,6 +1,7 @@
-from rest_framework import generics
 from rest_framework.generics import RetrieveAPIView
+from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -15,6 +16,7 @@ from paiements.paydunya_service import (
     PayDunyaError,
     PayDunyaNetworkError,
     _RETURN_URL,
+    construire_url_annulation,
 )
 
 # Modes qui déclenchent un paiement électronique via PayDunya
@@ -35,6 +37,14 @@ class SessionCotisationCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         return SessionCotisation.objects.filter(
             createur__gie=self.request.user.gie
+        ).annotate(
+            # Compteurs pour les indicateurs du serializer (une seule requête)
+            nb_cotisations=Count('cotisations', distinct=True),
+            nb_paies=Count(
+                'cotisations',
+                filter=Q(cotisations__statut='paye'),
+                distinct=True
+            ),
         )
 
     def perform_create(self, serializer):
@@ -64,12 +74,20 @@ class CotisationListView(generics.ListAPIView):
     def get_queryset(self):
         session_id = self.kwargs['session_id']
 
+        # Uniquement une session du groupement de l'utilisateur
         return Cotisation.objects.filter(
-            session_id=session_id
+            session_id=session_id,
+            session__createur__gie=self.request.user.gie
         )
+
+
 class CotisationDetailView(RetrieveAPIView):
-    queryset = Cotisation.objects.all()
     serializer_class = CotisationSerializer
+    permission_classes = [EstMembreGIE]
+
+    def get_queryset(self):
+        # Une cotisation d'un autre groupement est introuvable (404)
+        return Cotisation.objects.filter(membre__gie=self.request.user.gie)
 
 class CotisationPaiementView(generics.GenericAPIView):
 
@@ -78,7 +96,10 @@ class CotisationPaiementView(generics.GenericAPIView):
 
     def post(self, request, pk):
 
-        cotisation = Cotisation.objects.get(pk=pk)
+        # Cotisation du groupement de l'utilisateur uniquement (404 sinon)
+        cotisation = get_object_or_404(
+            Cotisation, pk=pk, membre__gie=request.user.gie
+        )
 
         # Vérification : seul le membre concerné ou le trésorier peut payer
         est_tresorier = request.user.role == 'tresorier'
@@ -108,7 +129,7 @@ class CotisationPaiementView(generics.GenericAPIView):
         if mode_paiement in MODES_ELECTRONIQUES:
             return self._initier_paiement_electronique(cotisation, mode_paiement)
 
-        # ─── Paiement en espèces — comportement inchangé ──────────────────────
+        # ─── Paiement en espèces ──────────────────────────────────────────────
         return self._paiement_especes(request, cotisation, mode_paiement)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -141,6 +162,7 @@ class CotisationPaiementView(generics.GenericAPIView):
                     f"?type=cotisation"
                     f"&id={cotisation.id}"
                 ),
+                cancel_url=construire_url_annulation('cotisation', cotisation.id),
             )
         except PayDunyaNetworkError as exc:
             return Response(
@@ -171,7 +193,7 @@ class CotisationPaiementView(generics.GenericAPIView):
         )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Paiement en espèces — comportement original inchangé
+    # Paiement en espèces : enregistré directement dans la caisse
     # ─────────────────────────────────────────────────────────────────────────
 
     @transaction.atomic

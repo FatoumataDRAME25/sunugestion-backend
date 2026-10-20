@@ -7,6 +7,7 @@ Distingue trois types d'opérations :
 - PAY-IN  cotisation          : COTISATION-<id>
 - PAY-IN  remboursement prêt  : PRET-REMBOURSEMENT-<id>
 - PAY-OUT décaissement prêt   : DECAISSEMENT-PRET-<id>  (via token_decaissement_paydunya)
+- PAY-IN  abonnement          : ABONNEMENT-<id>
 
 Note sur le format reçu :
 PayDunya envoie le callback en application/x-www-form-urlencoded, avec des clés
@@ -100,8 +101,48 @@ def paydunya_callback(request):
     if pret_remboursement:
         return _traiter_callback_payin(pret_remboursement, invoice_token, type_objet='remboursement_pret')
 
+    # ─── PAY-IN : abonnement du groupement ───────────────────────────────────
+    from abonnements.models import PaiementAbonnement
+    paiement_abonnement = PaiementAbonnement.objects.filter(
+        token_paydunya=invoice_token
+    ).first()
+    if paiement_abonnement:
+        return _traiter_callback_abonnement(paiement_abonnement)
+
     logger.warning("Callback PayDunya — token inconnu : %s...", invoice_token[:8])
     return Response({'detail': 'Token inconnu.'}, status=200)
+
+
+# ─── PAY-IN abonnement ────────────────────────────────────────────────────────
+
+def _traiter_callback_abonnement(paiement):
+    """Vérifie auprès de PayDunya et prolonge l'abonnement si le paiement est confirmé."""
+    from abonnements.views import verifier_paiement_aupres_de_paydunya
+
+    if paiement.statut == 'valide':
+        return Response({'statut': 'already_processed'}, status=200)
+
+    valide = verifier_paiement_aupres_de_paydunya(paiement)
+    paiement.refresh_from_db()
+
+    if valide:
+        abonnement = paiement.abonnement
+        destinataires = _president_tresorier_actifs(abonnement.gie)
+        if destinataires.exists():
+            envoyer_notification(
+                destinataires=destinataires,
+                titre='Abonnement renouvelé',
+                message=(
+                    f"Le paiement de {int(paiement.montant)} FCFA a été reçu. "
+                    f"Votre abonnement est actif jusqu'au "
+                    f"{paiement.periode_fin.strftime('%d/%m/%Y')}."
+                ),
+                type_evenement='abonnement_renouvele',
+                module='general',
+            )
+        logger.info("Callback — abonnement prolongé (paiement %s).", paiement.id)
+
+    return Response({'statut': paiement.statut}, status=200)
 
 
 # ─── PAY-IN handler ───────────────────────────────────────────────────────────

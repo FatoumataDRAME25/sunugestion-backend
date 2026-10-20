@@ -91,7 +91,8 @@ class OperationCreateView(generics.CreateAPIView):
 
         if serializer.validated_data['type_operation'] == 'sortie':
 
-            solde = calculer_solde(gie)
+            # calculer_solde renvoie (entrées, sorties, solde)
+            _, _, solde = calculer_solde(gie)
 
             montant_sortie = serializer.validated_data['montant']
 

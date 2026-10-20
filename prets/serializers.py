@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from django.utils import timezone
 
 from .models import Pret, ReglePret
 
@@ -19,6 +18,30 @@ class ReglePretSerializer(serializers.ModelSerializer):
             'cotisation_a_jour_obligatoire',
         ]
         read_only_fields = ['id', 'gie']
+
+    DUREE_MAX_AUTORISEE = 120  # 10 ans
+
+    def validate_montant_max(self, valeur):
+        if valeur <= 0:
+            raise serializers.ValidationError(
+                "Le montant maximum doit être supérieur à 0."
+            )
+        return valeur
+
+    def validate_duree_max_mois(self, valeur):
+        if not 1 <= valeur <= self.DUREE_MAX_AUTORISEE:
+            raise serializers.ValidationError(
+                f"La durée maximale doit être comprise entre 1 et "
+                f"{self.DUREE_MAX_AUTORISEE} mois."
+            )
+        return valeur
+
+    def validate_nombre_prets_simultanes(self, valeur):
+        if valeur < 1:
+            raise serializers.ValidationError(
+                "Le nombre de prêts simultanés doit être d'au moins 1."
+            )
+        return valeur
 
 
 

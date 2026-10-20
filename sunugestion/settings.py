@@ -12,29 +12,28 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
-from decouple import config
+from decouple import Csv, config
 
+import mimetypes
 import os
-#from dotenv import load_dotenv
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Valeurs lues uniquement dans le fichier .env (jamais écrites dans le code).
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = ['*']
+# Noms de domaine acceptés, séparés par des virgules dans le .env
+# (ex. ALLOWED_HOSTS=sunugestion.sn,api.sunugestion.sn).
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+# Adresses https d'où l'admin Django peut être utilisé derrière un intermédiaire
+# (domaine du serveur au déploiement). Jamais l'adresse ngrok : l'admin n'y est
+# pas exposé (voir nginx.conf)
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#z06hmd#@-e9b(meis@yi#xrc2n(($lfwd_6j6+qhx66c9__m#'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ['*']
+# Exécution des tests automatiques (python manage.py test)
+TESTS_EN_COURS = len(sys.argv) > 1 and sys.argv[1] == 'test'
 
 
 # Application definition
@@ -62,12 +61,20 @@ INSTALLED_APPS = [
     'notifications',
     'paiements',
     'gie',
+    'diagnostic',
+    'rapports',
+    'abonnements',
+
 ]
 
 # Modèle utilisateur personnalisé
 AUTH_USER_MODEL = 'authentication.Utilisateur'
 
 REST_FRAMEWORK = {
+    # Derrière nginx (Docker), l'adresse du client est lue dans X-Forwarded-For :
+    # sinon tous les utilisateurs partageraient les mêmes limites de connexion.
+    # Non défini en développement : adresse directe du client.
+    'NUM_PROXIES': config('NUM_PROXIES', default=None, cast=lambda v: int(v) if v else None),
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
@@ -88,6 +95,23 @@ REST_FRAMEWORK = {
         'djangorestframework_camel_case.parser.CamelCaseMultiPartParser',
         'djangorestframework_camel_case.parser.CamelCaseJSONParser',
     ),
+
+    # Nombre de requêtes autorisées par adresse IP sur les endpoints publics
+    # sensibles (ScopedRateThrottle) : freine les essais répétés de PIN,
+    # de code OTP ou de lien d'activation. Assoupli pendant les tests.
+    'DEFAULT_THROTTLE_RATES': {
+        'connexion': '10/min',
+        'otp': '5/min',
+        'activation': '10/min',
+        'inscription': '20/hour',
+        'assistant': '20/hour',
+    } if not TESTS_EN_COURS else {
+        'connexion': '10000/min',
+        'otp': '10000/min',
+        'activation': '10000/min',
+        'inscription': '10000/min',
+        'assistant': '10000/min',
+    },
 }
 
 # Configuration de JWT pour la duree de vie des tokens et la rotation des tokens
@@ -110,6 +134,8 @@ SPECTACULAR_SETTINGS = {
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Sert les fichiers statiques (admin, Swagger) sous gunicorn, sans nginx dédié
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -123,7 +149,9 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
     "http://127.0.0.1:4200",
-    'https://stitch-freebie-dreamless.ngrok-free.dev'
+    'https://stitch-freebie-dreamless.ngrok-free.dev',
+    # Adresse ngrok utilisée dans les liens d'invitation (pages ajouter / importer membre)
+    'https://reviving-gurgle-pauper.ngrok-free.dev',
 ]
 
 ROOT_URLCONF = 'sunugestion.urls'
@@ -205,12 +233,17 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# Rempli par `collectstatic` au démarrage du conteneur
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Logos enregistrés en WebP : type absent de la table du système dans l'image
+# Docker, sinon servi en application/octet-stream par Django (développement)
+mimetypes.add_type('image/webp', '.webp')
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -243,10 +276,3 @@ PAYDUNYA_CALLBACK_URL = config('PAYDUNYA_CALLBACK_URL', default='')
 PAYDUNYA_RETURN_URL = config('PAYDUNYA_RETURN_URL', default='')
 PAYDUNYA_CANCEL_URL = config('PAYDUNYA_CANCEL_URL', default='')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:4200')
-
-# Firebase Admin SDK
-# Chemin absolu construit depuis BASE_DIR pour fonctionner aussi bien avec
-# runserver qu'avec CRON (qui ne démarre pas depuis le répertoire du projet).
-FIREBASE_CREDENTIALS_PATH = str(
-    BASE_DIR / 'sunugestion' / 'firebase-credentials.json'
-)

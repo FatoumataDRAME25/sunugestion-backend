@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from sunugestion.settings import APP_URL
 import re
+
+from authentication.validators import valider_telephone
 
 Utilisateur = get_user_model()
 
@@ -11,24 +12,6 @@ ROLES_AUTORISES = [
     'secretaire',
     'membre'
 ]
-
-FORMAT_TELEPHONE = r'^(70|71|75|76|77|78)[0-9]{7}$'
-
-
-def valider_telephone(telephone):
-    """Vérifie le format sénégalais et l'unicité."""
-    erreurs = []
-    telephone = str(telephone).strip()
-
-    if not re.match(FORMAT_TELEPHONE, telephone):
-        erreurs.append(
-            "Format invalide — doit commencer par 70, 71, 75, 76, 77 ou 78"
-        )
-
-    if Utilisateur.objects.filter(telephone=telephone).exists():
-        erreurs.append("Ce numéro existe déjà")
-
-    return telephone, erreurs
 
 
 def valider_role(role):
@@ -42,6 +25,43 @@ def valider_role(role):
         ]
 
     return role, []
+
+
+# Fonctions du bureau occupées par une seule personne à la fois dans un GIE
+# (le président est géré à part, par la passation de présidence)
+FONCTIONS_UNIQUES = {
+    'tresorier': 'trésorier',
+    'secretaire': 'secrétaire',
+}
+
+
+def erreur_role_nouveau_membre(gie, role, roles_deja_pris=()):
+    """
+    Rôle d'un membre ajouté ou importé :
+    - président : jamais, la présidence se transmet par passation ;
+    - trésorier, secrétaire : seulement si le poste est libre.
+    `roles_deja_pris` : fonctions déjà attribuées plus haut dans le même fichier.
+    Retourne le message d'erreur, ou None si le rôle est accepté.
+    """
+    if role == 'president':
+        return (
+            "Le rôle président ne peut pas être attribué à un nouveau membre. "
+            "La présidence se transmet depuis la fiche d'un membre."
+        )
+
+    if role in FONCTIONS_UNIQUES:
+        libelle = FONCTIONS_UNIQUES[role]
+        if role in roles_deja_pris:
+            return f"Le fichier contient plusieurs {libelle}s : un seul est possible."
+
+        occupant = Utilisateur.objects.filter(gie=gie, role=role).first()
+        if occupant:
+            return (
+                f"Le GIE a déjà un {libelle} ({occupant.prenom} {occupant.nom}). "
+                f"Ajoutez ce membre comme membre simple."
+            )
+
+    return None
 
 
 def valider_nom_prenom(valeur, champ):
@@ -74,10 +94,8 @@ class AjoutMembreSerializer(serializers.Serializer):
 
     def validate_telephone(self, valeur):
         telephone, erreurs = valider_telephone(valeur)
-
         if erreurs:
             raise serializers.ValidationError(erreurs)
-
         return telephone
 
     def validate_prenom(self, valeur):
@@ -85,6 +103,14 @@ class AjoutMembreSerializer(serializers.Serializer):
 
     def validate_nom(self, valeur):
         return valider_nom_prenom(valeur, "nom")
+
+    def validate_role(self, valeur):
+        erreur = erreur_role_nouveau_membre(
+            self.context['gie'], valeur, self.context.get('roles_deja_pris', ())
+        )
+        if erreur:
+            raise serializers.ValidationError(erreur)
+        return valeur
 
     def create(self, validated_data):
 
@@ -120,11 +146,18 @@ class ImportExcelSerializer(serializers.Serializer):
 
     fichier = serializers.FileField()
 
+    TAILLE_MAX_OCTETS = 5 * 1024 * 1024  # 5 Mo
+
     def validate_fichier(self, fichier):
 
         if not fichier.name.endswith('.xlsx'):
             raise serializers.ValidationError(
                 "Le fichier doit être au format .xlsx"
+            )
+
+        if fichier.size > self.TAILLE_MAX_OCTETS:
+            raise serializers.ValidationError(
+                "Le fichier est trop volumineux (5 Mo maximum)."
             )
 
         return fichier
@@ -135,18 +168,21 @@ class ImportExcelSerializer(serializers.Serializer):
 
         fichier = self.validated_data['fichier']
 
-        wb = openpyxl.load_workbook(fichier)
+        # Un fichier renommé en .xlsx ou endommagé fait échouer openpyxl
+        try:
+            wb = openpyxl.load_workbook(fichier)
+        except Exception:
+            raise serializers.ValidationError(
+                "Le fichier est illisible ou n'est pas un vrai fichier Excel (.xlsx)."
+            )
         ws = wb.active
 
-        colonnes_requises = [
-            'prenom',
-            'nom',
-            'telephone',
-            'role'
-        ]
+        colonnes_requises = ['prenom', 'nom', 'telephone', 'role']
 
         membres_valides = []
         membres_invalides = []
+        gie = self.context.get('gie')
+        roles_du_fichier = set()
 
         # Récupération des colonnes
         headers = [
@@ -156,7 +192,6 @@ class ImportExcelSerializer(serializers.Serializer):
 
         # Vérification des colonnes obligatoires
         for col in colonnes_requises:
-
             if col not in headers:
                 raise serializers.ValidationError(
                     f"Colonne manquante dans le fichier : '{col}'"
@@ -167,86 +202,56 @@ class ImportExcelSerializer(serializers.Serializer):
             ws.iter_rows(min_row=2, values_only=True),
             start=2
         ):
-
             # Ignorer les lignes complètement vides
             if not any(ligne):
                 continue
 
             donnees = dict(zip(headers, ligne))
-
             erreurs_ligne = []
 
-            prenom = str(
-                donnees.get('prenom', '') or ''
-            ).strip()
+            prenom = str(donnees.get('prenom', '') or '').strip()
+            nom = str(donnees.get('nom', '') or '').strip()
+            telephone = str(donnees.get('telephone', '') or '').strip()
+            role = str(donnees.get('role', '') or '').strip().lower()
 
-            nom = str(
-                donnees.get('nom', '') or ''
-            ).strip()
-
-            telephone = str(
-                donnees.get('telephone', '') or ''
-            ).strip()
-
-            role = str(
-                donnees.get('role', '') or ''
-            ).strip().lower()
-
-            # -----------------------------
             # Prénom
-            # -----------------------------
-
             if not prenom:
                 erreurs_ligne.append("Prénom manquant")
             else:
                 try:
-                    prenom = valider_nom_prenom(
-                        prenom,
-                        "prénom"
-                    )
+                    prenom = valider_nom_prenom(prenom, "prénom")
                 except serializers.ValidationError as erreur:
                     erreurs_ligne.extend(erreur.detail)
 
-            # -----------------------------
             # Nom
-            # -----------------------------
-
             if not nom:
                 erreurs_ligne.append("Nom manquant")
             else:
                 try:
-                    nom = valider_nom_prenom(
-                        nom,
-                        "nom"
-                    )
+                    nom = valider_nom_prenom(nom, "nom")
                 except serializers.ValidationError as erreur:
                     erreurs_ligne.extend(erreur.detail)
 
-            # -----------------------------
             # Téléphone
-            # -----------------------------
-
             if not telephone:
                 erreurs_ligne.append("Téléphone manquant")
             else:
-
-                telephone, erreurs_tel = valider_telephone(
-                    telephone
-                )
-
+                telephone, erreurs_tel = valider_telephone(telephone)
                 erreurs_ligne.extend(erreurs_tel)
 
-            # -----------------------------
             # Rôle
-            # -----------------------------
-
             if not role:
                 erreurs_ligne.append("Rôle manquant")
             else:
-
                 role, erreurs_role = valider_role(role)
-
                 erreurs_ligne.extend(erreurs_role)
+
+                if not erreurs_role and gie is not None:
+                    erreur = erreur_role_nouveau_membre(gie, role, roles_du_fichier)
+                    if erreur:
+                        erreurs_ligne.append(erreur)
+                    elif role in FONCTIONS_UNIQUES:
+                        roles_du_fichier.add(role)
 
             membre = {
                 'ligne': numero_ligne,
@@ -257,13 +262,9 @@ class ImportExcelSerializer(serializers.Serializer):
             }
 
             if erreurs_ligne:
-
                 membre['erreurs'] = erreurs_ligne
-
                 membres_invalides.append(membre)
-
             else:
-
                 membres_valides.append(membre)
 
         return membres_valides, membres_invalides
@@ -274,6 +275,11 @@ class ImportExcelSerializer(serializers.Serializer):
 # ==========================================================
 
 class MembreSerializer(serializers.ModelSerializer):
+
+    # Date d'expiration du lien d'invitation (comptes en attente uniquement)
+    invitation_expiration = serializers.DateTimeField(
+        source='token_expiration', read_only=True
+    )
 
     class Meta:
 
@@ -286,16 +292,21 @@ class MembreSerializer(serializers.ModelSerializer):
             'telephone',
             'email',
             'role',
+            'fonction_bureau',
             'statut',
+            'invitation_expiration',
         ]
 
         # Champs protégés :
+        # telephone → identifiant de connexion, non modifiable depuis le profil
         # role   → modifiable uniquement via modifier_role (président)
         # statut → modifiable uniquement via suspendre/reactiver (président)
         # gie    → jamais modifiable par l'utilisateur (non exposé dans fields)
         read_only_fields = [
             'id',
+            'telephone',
             'role',
+            'fonction_bureau',
             'statut',
         ]
 
@@ -306,32 +317,13 @@ class MembreSerializer(serializers.ModelSerializer):
         return valider_nom_prenom(valeur, "nom")
 
     def validate_telephone(self, valeur):
-
-        telephone = str(valeur).strip()
-
-        # Pendant une modification, le numéro actuel
-        # appartient déjà à l'utilisateur.
         utilisateur = self.instance
-
-        requete = Utilisateur.objects.filter(
-            telephone=telephone
-        ).exclude(
-            id=utilisateur.id
+        telephone, erreurs = valider_telephone(
+            valeur,
+            exclure_id=utilisateur.id if utilisateur else None
         )
-
-        if not re.match(
-            FORMAT_TELEPHONE,
-            telephone
-        ):
-            raise serializers.ValidationError(
-                "Format de téléphone invalide."
-            )
-
-        if requete.exists():
-            raise serializers.ValidationError(
-                "Ce numéro de téléphone est déjà utilisé."
-            )
-
+        if erreurs:
+            raise serializers.ValidationError(erreurs)
         return telephone
 
     def validate_email(self, valeur):

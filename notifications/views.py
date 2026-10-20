@@ -2,73 +2,89 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification
-from .serializers import FCMTokenSerializer
-from .service import compter_non_lues_par_module, marquer_module_comme_lu
+from .models import NotificationUtilisateur
+from .serializers import NotificationListeSerializer
 
-# Modules valides extraits des choices du modèle
-MODULES_VALIDES = [choix[0] for choix in Notification.MODULE_CHOICES]
-
-
-class FCMTokenCreateView(generics.GenericAPIView):
-
-    serializer_class = FCMTokenSerializer
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        fcm_token = serializer.save()
-
-        return Response(
-            FCMTokenSerializer(fcm_token).data,
-            status=status.HTTP_201_CREATED
-        )
+# Nombre maximal de notifications renvoyées par la liste
+LIMITE_LISTE = 50
 
 
-class BadgesView(generics.GenericAPIView):
+class NotificationListView(generics.GenericAPIView):
     """
-    GET /api/notifications/badges/
-    Retourne le nombre de notifications non lues par module
-    pour l'utilisateur connecté.
+    GET /api/notifications/
+    Retourne les dernières notifications de l'utilisateur connecté
+    (les plus récentes d'abord) et le nombre total de non lues.
     """
 
+    serializer_class = NotificationListeSerializer
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        badges = compter_non_lues_par_module(request.user)
-        return Response(badges, status=status.HTTP_200_OK)
+        liaisons = NotificationUtilisateur.objects.filter(
+            utilisateur=request.user
+        )
+
+        recentes = liaisons.select_related('notification').order_by(
+            '-notification__date_creation', '-notification__id'
+        )[:LIMITE_LISTE]
+
+        return Response(
+            {
+                'notifications': self.get_serializer(recentes, many=True).data,
+                'non_lues': liaisons.filter(lue=False).count(),
+            },
+            status=status.HTTP_200_OK
+        )
 
 
-class MarquerModuleLuView(generics.GenericAPIView):
+class NotificationLireView(generics.GenericAPIView):
     """
-    PATCH /api/notifications/badges/<module>/lire/
-    Marque toutes les notifications non lues d'un module comme lues
-    pour l'utilisateur connecté.
+    PATCH /api/notifications/<id>/lire/
+    Marque une notification comme lue pour l'utilisateur connecté.
     """
 
     permission_classes = [IsAuthenticated]
 
-    def patch(self, request, module):
+    def patch(self, request, pk):
+        modifiees = NotificationUtilisateur.objects.filter(
+            utilisateur=request.user,
+            notification_id=pk
+        ).update(lue=True)
 
-        # Vérifier que le module fourni est valide
-        if module not in MODULES_VALIDES:
+        # Notification inexistante ou destinée à un autre utilisateur
+        if not modifiees:
             return Response(
-                {
-                    'detail': (
-                        f"Module invalide : '{module}'. "
-                        f"Valeurs autorisées : {', '.join(MODULES_VALIDES)}."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
+                {'detail': 'Notification introuvable.'},
+                status=status.HTTP_404_NOT_FOUND
             )
-
-        nombre = marquer_module_comme_lu(request.user, module)
 
         return Response(
             {
-                'module': module,
-                'nombre_marquees_lues': nombre,
+                'id': pk,
+                'lue': True,
+                'non_lues': NotificationUtilisateur.objects.filter(
+                    utilisateur=request.user, lue=False
+                ).count(),
             },
+            status=status.HTTP_200_OK
+        )
+
+
+class NotificationsToutLireView(generics.GenericAPIView):
+    """
+    PATCH /api/notifications/tout-lire/
+    Marque toutes les notifications de l'utilisateur connecté comme lues.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        nombre = NotificationUtilisateur.objects.filter(
+            utilisateur=request.user,
+            lue=False
+        ).update(lue=True)
+
+        return Response(
+            {'nombre_marquees_lues': nombre, 'non_lues': 0},
             status=status.HTTP_200_OK
         )

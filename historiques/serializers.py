@@ -101,3 +101,11 @@ class OperationCreateSerializer(serializers.ModelSerializer):
             'montant',
             'libelle',
         ]
+
+    def validate_montant(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Le montant doit être strictement supérieur à zéro."
+            )
+
+        return value

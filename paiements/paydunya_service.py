@@ -448,3 +448,11 @@ from urllib.parse import urlencode
 def construire_url_retour(type_paiement: str, objet_id: int) -> str:
     sep = "&" if "?" in _RETURN_URL else "?"
     return f"{_RETURN_URL}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"
+
+
+def construire_url_annulation(type_paiement: str, objet_id: int) -> str:
+    """Page « Paiement annulé » : le type et l'id permettent d'y revenir au bon endroit."""
+    if not _CANCEL_URL:
+        return ""
+    sep = "&" if "?" in _CANCEL_URL else "?"
+    return f"{_CANCEL_URL}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"

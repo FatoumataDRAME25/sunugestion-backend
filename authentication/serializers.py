@@ -5,7 +5,10 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import GIE
+from .validators import valider_nom_gie, valider_telephone, valider_telephone_gie
 import secrets
+from datetime import timedelta
+from django.utils import timezone
 
 Utilisateur = get_user_model()
 
@@ -15,15 +18,16 @@ class GIECreationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GIE
-        fields = ['id','nom', 'region', 'type_gie', 'telephone', 'photo']
+        fields = ['id','nom', 'region', 'type_gie', 'telephone', 'logo']
+        # Le logo s'envoie après l'inscription, par /api/gie/infos/ (fichier vérifié)
+        read_only_fields = ['logo']
         
 
     def validate_nom(self, valeur):
-        if not valeur.strip():
-            raise serializers.ValidationError(
-                "Le nom du GIE ne peut pas être vide."
-            )
-        return valeur.strip()
+        return valider_nom_gie(valeur)
+
+    def validate_telephone(self, valeur):
+        return valider_telephone_gie(valeur)
 
     def create(self, validated_data):
         # Générer un token d'inscription temporaire
@@ -48,13 +52,14 @@ class GIESerializer(serializers.ModelSerializer):
             'region',
             'type_gie',
             'telephone',
-            'photo',
+            'logo',
             'code',
             'date_creation',
             'statut',
             'nombre_membres'
         ]
-        read_only_fields = ['id', 'code', 'date_creation']
+        # logo : modifiable uniquement par /api/gie/infos/ (fichier vérifié)
+        read_only_fields = ['id', 'code', 'date_creation', 'logo']
 
     def get_nombre_membres(self, gie):
         return gie.membres.count()
@@ -89,11 +94,10 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         ]
 
     def validate_telephone(self, valeur):
-        if Utilisateur.objects.filter(telephone=valeur).exists():
-            raise serializers.ValidationError(
-                "Ce numéro de téléphone est déjà utilisé."
-            )
-        return valeur
+        telephone, erreurs = valider_telephone(valeur)
+        if erreurs:
+            raise serializers.ValidationError(erreurs)
+        return telephone
 
     def validate_pin(self, valeur):
         if not valeur.isdigit():
@@ -144,9 +148,6 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
         # Générer et envoyer l'OTP
         otp = president.generer_otp()
 
-        print(">>> DESTINATAIRE EMAIL :", president.email)
-        print(">>> ENVOI DE L'EMAIL OTP...")
-
         send_mail(
             subject="Votre code OTP - SunuGestion",
             message=(
@@ -158,8 +159,6 @@ class InscriptionPresidentSerializer(serializers.ModelSerializer):
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[president.email],
         )
-
-        print(">>> EMAIL OTP ENVOYÉ")
 
         return president
 
@@ -215,6 +214,56 @@ class VerifierOTPSerializer(serializers.Serializer):
         return president
 
 
+class RenvoyerOTPSerializer(serializers.Serializer):
+    """Renvoie un nouveau code OTP au Président."""
+
+    token_inscription = serializers.CharField()
+
+    def validate(self, data):
+        try:
+            gie = GIE.objects.get(
+                token_inscription=data['token_inscription'],
+                statut='en_attente'
+            )
+
+            president = Utilisateur.objects.get(
+                gie=gie,
+                role='president',
+                statut='en_attente'
+            )
+
+            data['president'] = president
+
+        except (GIE.DoesNotExist, Utilisateur.DoesNotExist):
+            raise serializers.ValidationError(
+                "Session d'inscription invalide ou expirée."
+            )
+
+        return data
+
+    def create(self, validated_data):
+        president = validated_data['president']
+
+        # Générer un nouveau code OTP
+        otp = president.generer_otp()
+
+        # Envoyer le nouveau code par e-mail
+        send_mail(
+            subject="Votre nouveau code OTP - SunuGestion",
+            message=(
+                f"Bonjour {president.prenom},\n\n"
+                f"Votre nouveau code OTP pour activer votre compte "
+                f"SunuGestion est : {otp}\n\n"
+                f"Ce code est valable pendant 10 minutes.\n\n"
+                f"L'équipe SunuGestion"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[president.email],
+        )
+
+        return president
+
+
 class ConnexionSerializer(serializers.Serializer):
     telephone = serializers.CharField()
     pin = serializers.CharField(max_length=4, min_length=4)
@@ -228,7 +277,21 @@ class ConnexionSerializer(serializers.Serializer):
             utilisateur = Utilisateur.objects.get(telephone=telephone)
         except Utilisateur.DoesNotExist:
             raise serializers.ValidationError(
-                "Numéro de téléphone introuvable."
+                "Numéro de téléphone ou code PIN incorrect."
+            )
+
+        # Compte suspendu par le président du groupement
+        if utilisateur.statut == 'inactif':
+            raise serializers.ValidationError(
+                "Votre compte a été suspendu. "
+                "Contactez le président de votre groupement."
+            )
+
+        # Groupement désactivé par l'administrateur de la plateforme
+        if utilisateur.gie is not None and utilisateur.gie.statut == 'inactif':
+            raise serializers.ValidationError(
+                "Votre groupement a été désactivé. "
+                "Contactez l'administrateur de SunuGestion."
             )
 
         # Vérifier que le compte est actif
@@ -239,7 +302,28 @@ class ConnexionSerializer(serializers.Serializer):
 
         # Vérifier le PIN
         valide, message = utilisateur.verifier_pin(pin)
+
         if not valide:
+            # Ajouter le temps restant si le compte est verrouillé
+            if utilisateur.verrouille and utilisateur.date_verrouillage:
+                maintenant = timezone.now()
+                fin_verrouillage = (
+                    utilisateur.date_verrouillage
+                    + timedelta(minutes=15)
+                )
+
+                secondes_restantes = max(
+                    0,
+                    int(
+                        (fin_verrouillage - maintenant).total_seconds()
+                    )
+                )
+
+                raise serializers.ValidationError({
+                    'message': message,
+                    'secondes_restantes': secondes_restantes
+                })
+
             raise serializers.ValidationError(message)
 
         data['utilisateur'] = utilisateur

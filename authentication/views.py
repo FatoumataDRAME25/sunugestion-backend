@@ -2,7 +2,6 @@ from django.utils import timezone
 
 from dateutil.relativedelta import relativedelta
 from django.db.models.aggregates import Count
-from django.shortcuts import render
 from drf_spectacular.utils import extend_schema
 
 from rest_framework.views import APIView
@@ -10,11 +9,13 @@ from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework import status, serializers
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from rest_framework.generics import ListAPIView
 
 from authentication.models import GIE
+from authentication.permissions import EstAdministrateur
 
 from .serializers import (
     ConnexionSerializer,
@@ -22,7 +23,8 @@ from .serializers import (
     GIECreationSerializer,
     GIESerializer,
     InscriptionPresidentSerializer,
-    VerifierOTPSerializer
+    VerifierOTPSerializer,
+    RenvoyerOTPSerializer
 )
 
 Utilisateur = get_user_model()
@@ -43,6 +45,8 @@ class CreerGIEView(APIView):
     Retourne un token d'inscription temporaire.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'inscription'
 
     serializer_class = GIECreationSerializer
     @extend_schema(
@@ -69,19 +73,19 @@ class CreerGIEView(APIView):
 class ListeGIEView(ListAPIView):
     queryset = GIE.objects.all().order_by('-date_creation')
     serializer_class = GIESerializer
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
 
 # Voir detail d'un GIE
 class DetailGIEView(RetrieveUpdateAPIView):
     queryset = GIE.objects.all()
     serializer_class = GIESerializer
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
 
 class StatistiquesGIEView(APIView):
 
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
     serializer_class = GIESerializer
 
     @extend_schema(
@@ -128,6 +132,8 @@ class InscriptionPresidentView(APIView):
     Le système génère et envoie un OTP par SMS.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'inscription'
 
     @extend_schema(
         request=InscriptionPresidentSerializer
@@ -154,6 +160,8 @@ class VerifierOTPView(APIView):
     Le système active le compte et retourne les tokens JWT.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'otp'
 
     @extend_schema(
         request=VerifierOTPSerializer
@@ -184,6 +192,32 @@ class VerifierOTPView(APIView):
         )
 
 
+class RenvoyerOTPView(APIView):
+    """
+    Renvoie un nouveau code OTP au Président.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'otp'
+
+    @extend_schema(
+        request=RenvoyerOTPSerializer
+    )
+    def post(self, request):
+        serializer = RenvoyerOTPSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response({
+                'message': 'Un nouveau code OTP a été envoyé à votre adresse e-mail.'
+            }, status=status.HTTP_200_OK)
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 class ConnexionView(APIView):
     """
@@ -191,6 +225,8 @@ class ConnexionView(APIView):
     Retourne les tokens JWT si les identifiants sont corrects.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'connexion'
 
     @extend_schema(
         request=ConnexionSerializer
@@ -244,8 +280,6 @@ class DeconnexionView(APIView):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-
-from authentication.permissions import EstAdministrateur
 
 # ──────────────────────────────────────────────────────
 # PROFIL ADMIN
@@ -321,9 +355,10 @@ class ChangerPinAdminView(APIView):
     permission_classes = [EstAdministrateur]
 
     def post(self, request):
-        pin_actuel      = request.data.get('pinActuel', '')
-        nouveau_pin     = request.data.get('nouveauPin', '')
-        confirmation    = request.data.get('confirmationPin', '')
+        # Le parser camelCase convertit les clés reçues en snake_case
+        pin_actuel      = request.data.get('pin_actuel', request.data.get('pinActuel', ''))
+        nouveau_pin     = request.data.get('nouveau_pin', request.data.get('nouveauPin', ''))
+        confirmation    = request.data.get('confirmation_pin', request.data.get('confirmationPin', ''))
 
         if not pin_actuel or not nouveau_pin or not confirmation:
             return Response(
@@ -356,7 +391,7 @@ class ChangerPinAdminView(APIView):
 
 
 class EvolutionGIEView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
     def get(self, request):
 
@@ -404,7 +439,7 @@ class EvolutionGIEView(APIView):
 
 
 class RepartitionSecteursView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [EstAdministrateur]
 
     def get(self, request):
 
