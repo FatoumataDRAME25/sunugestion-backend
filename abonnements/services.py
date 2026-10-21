@@ -23,10 +23,10 @@ TOLERANCE_MEMBRES = 2
 
 # (seuil maximum affiché, montant mensuel en FCFA) — None : sans limite
 PALIERS = [
-    (15, 5000),
-    (34, 10000),
-    (50, 15000),
-    (None, 20000),
+    (15, 2900),
+    (34, 3900),
+    (50, 4900),
+    (None, 5900),
 ]
 
 

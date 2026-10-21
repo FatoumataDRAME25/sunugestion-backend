@@ -26,13 +26,13 @@ class TarifTestCase(SimpleTestCase):
 
     def test_grille_avec_tolerance_de_deux_membres(self):
         attendus = {
-            0: 5000, 1: 5000, 15: 5000,
-            16: 5000, 17: 5000,          # tolérance au-dessus de 15
-            18: 10000, 34: 10000,
-            35: 10000, 36: 10000,        # tolérance au-dessus de 34
-            37: 15000, 50: 15000,
-            51: 15000, 52: 15000,        # tolérance au-dessus de 50
-            53: 20000, 500: 20000,
+            0: 2900, 1: 2900, 15: 2900,
+            16: 2900, 17: 2900,          # tolérance au-dessus de 15
+            18: 3900, 34: 3900,
+            35: 3900, 36: 3900,        # tolérance au-dessus de 34
+            37: 4900, 50: 4900,
+            51: 4900, 52: 4900,        # tolérance au-dessus de 50
+            53: 5900, 500: 5900,
         }
         for membres, montant in attendus.items():
             with self.subTest(membres=membres):
@@ -42,7 +42,7 @@ class TarifTestCase(SimpleTestCase):
         tarif = calculer_tarif(16)
         self.assertTrue(tarif['dans_tolerance'])
         self.assertEqual(tarif['membres_avant_palier_suivant'], 2)
-        self.assertEqual(tarif['montant_palier_suivant'], 10000)
+        self.assertEqual(tarif['montant_palier_suivant'], 3900)
 
         self.assertFalse(calculer_tarif(10)['dans_tolerance'])
         self.assertEqual(calculer_tarif(10)['membres_avant_palier_suivant'], 8)
@@ -177,7 +177,7 @@ class EtatAbonnementTestCase(AbonnementMixin, TestCase):
         paiement = creer_paiement(self.gie, 'wave')
 
         self.assertEqual(paiement.nombre_membres, 4)
-        self.assertEqual(int(paiement.montant), 5000)
+        self.assertEqual(int(paiement.montant), 2900)
 
 
 # ─── Lecture seule ────────────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ class MonAbonnementTestCase(AbonnementMixin, TestCase):
                 self.assertEqual(donnees['etat'], 'essai')
                 self.assertTrue(donnees['peutPayer'])
                 self.assertEqual(donnees['membresActifs'], 4)
-                self.assertEqual(donnees['tarif']['montant'], 5000)
+                self.assertEqual(donnees['tarif']['montant'], 2900)
                 self.assertIn('paiements', donnees)
 
         for auteur in (self.secretaire, self.membre):
@@ -325,7 +325,7 @@ class PaiementPayDunyaTestCase(AbonnementMixin, TestCase):
 
         self.assertEqual(reponse.status_code, 201)
         self.assertEqual(reponse.json()['urlPaiement'], FACTURE['url_paiement'])
-        self.assertEqual(facture.call_args.kwargs['montant'], 5000)
+        self.assertEqual(facture.call_args.kwargs['montant'], 2900)
         self.assertIn('type=abonnement', facture.call_args.kwargs['return_url'])
 
         paiement = PaiementAbonnement.objects.get()
@@ -339,7 +339,7 @@ class PaiementPayDunyaTestCase(AbonnementMixin, TestCase):
         fin_essai = obtenir_abonnement(self.gie).date_fin
 
         with patch('abonnements.views.verifier_facture',
-                   return_value={'statut': 'completed', 'montant_confirme': 5000}):
+                   return_value={'statut': 'completed', 'montant_confirme': 2900}):
             reponse = self.client_de().post(
                 '/api/paiements/paydunya/callback/',
                 {'data[invoice][token]': 'jeton-abonnement'}
@@ -387,7 +387,7 @@ class PaiementPayDunyaTestCase(AbonnementMixin, TestCase):
         paiement_id = reponse.json()['paiementId']
 
         with patch('abonnements.views.verifier_facture',
-                   return_value={'statut': 'completed', 'montant_confirme': 5000}):
+                   return_value={'statut': 'completed', 'montant_confirme': 2900}):
             reponse = self.client_de(self.tresorier).get(f'/api/abonnements/paiements/{paiement_id}/')
 
         self.assertEqual(reponse.status_code, 200)
@@ -409,7 +409,7 @@ class AdministrationTestCase(AbonnementMixin, TestCase):
         self.assertEqual(reponse.status_code, 200)
         alpha = next(i for i in reponse.json() if i['code'] == 'ALPHA')
         self.assertEqual(alpha['membresActifs'], 4)
-        self.assertEqual(alpha['montantMensuel'], 5000)
+        self.assertEqual(alpha['montantMensuel'], 2900)
         self.assertEqual(alpha['abonnement']['etat'], 'essai')
 
     def test_reserve_a_l_administrateur(self):
@@ -505,5 +505,5 @@ class GrillePubliqueTestCase(TestCase):
         self.assertEqual(donnees['tolerance'], 2)
         self.assertEqual(
             [(p['membresMin'], p['membresMax'], p['montant']) for p in donnees['paliers']],
-            [(1, 15, 5000), (16, 34, 10000), (35, 50, 15000), (51, None, 20000)]
+            [(1, 15, 2900), (16, 34, 3900), (35, 50, 4900), (51, None, 5900)]
         )
