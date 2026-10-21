@@ -19,8 +19,9 @@ from paiements.paydunya_service import (
     verifier_decaissement,
     PayDunyaError,
     PayDunyaNetworkError,
-    _RETURN_URL,
     construire_url_annulation,
+    construire_url_retour,
+    origine_requete,
 )
 
 from .models import ReglePret, Pret
@@ -159,7 +160,7 @@ class PretView(generics.GenericAPIView):
             return Response(
                 {
                     'message': (
-                        'Les règles de prêt de ce GIE '
+                        'Les règles de prêt de cette organisation '
                         'ne sont pas encore configurées.'
                     )
                 },
@@ -347,7 +348,7 @@ class PretApprobationView(generics.GenericAPIView):
             return Response(
                 {
                     'message': (
-                        'Les règles de prêt de ce GIE '
+                        'Les règles de prêt de cette organisation '
                         'ne sont pas configurées.'
                     )
                 },
@@ -513,11 +514,30 @@ class PretDecaissementView(generics.GenericAPIView):
         Le prêt N'est PAS marqué comme en_cours ici.
         Il le sera uniquement après confirmation SUCCESS par PayDunya.
         """
+        # Imports locaux : paiements.views importe déjà ce module
+        from paiements import paydunya_service
+        from paiements.views import _valider_decaissement
+
+        # PayDunya n'accepte les décaissements qu'avec des clés LIVE : en mode
+        # test, le décaissement est simulé et validé comme le ferait la
+        # confirmation PayDunya (prêt en cours, sortie de caisse, notification).
+        if paydunya_service.PAYDUNYA_MODE == 'test':
+            pret.mode_paiement = mode_paiement
+            pret.save(update_fields=['mode_paiement'])
+            reponse = _valider_decaissement(pret, int(pret.montant))
+            if reponse.status_code != 200:
+                return reponse
+            pret.refresh_from_db()
+            return Response(PretSerializer(pret).data, status=200)
+
         membre = pret.membre
         reference = f"DECAISSEMENT-PRET-{pret.id}"
 
-        # Supprimer l'indicatif pays si présent (ex: +221771234567 → 771234567)
-        telephone = (membre.telephone or '').lstrip('+').lstrip('221')
+        # Supprimer l'indicatif pays si présent (ex: +221771234567 → 771234567).
+        # lstrip('221') retirerait tous les « 2 » et « 1 » de tête, pas le préfixe.
+        telephone = (membre.telephone or '').strip().lstrip('+')
+        if telephone.startswith('221') and len(telephone) > 9:
+            telephone = telephone[3:]
 
         try:
             # Étape 1 : obtenir le disburse_token
@@ -659,12 +679,9 @@ class PretRemboursementView(generics.GenericAPIView):
                 reference=reference,
                 nom_client=f"{membre.prenom} {membre.nom}",
                 telephone_client=membre.telephone or '',
-                return_url=(
-                    f"{_RETURN_URL}"
-                    f"?type=pret"
-                    f"&id={pret.id}"
-                ),
-                cancel_url=construire_url_annulation('pret', pret.id),
+                # Retour sur le site d'où le paiement est lancé (session conservée)
+                return_url=construire_url_retour('pret', pret.id, origine_requete(self.request)),
+                cancel_url=construire_url_annulation('pret', pret.id, origine_requete(self.request)),
             )
         except PayDunyaNetworkError as exc:
             return Response(

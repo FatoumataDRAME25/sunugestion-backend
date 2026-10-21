@@ -45,6 +45,19 @@ class IndicateursSessionsTestCase(TestCase):
             date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
         )
 
+    def test_sessions_de_la_plus_recente_a_la_plus_ancienne(self):
+        # L'écran affiche la première session ouverte de la liste : la dernière créée doit venir en tête
+        nouvelle = SessionCotisation.objects.create(
+            createur=self.tresorier, gie=self.gie, libelle='Novembre', montant=5000,
+            date_debut=date(2026, 11, 1), date_fin=date(2026, 11, 30)
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.tresorier)
+
+        ids = [s['id'] for s in client.get('/api/cotisations/sessions/').json()]
+
+        self.assertEqual(ids, [nouvelle.id, self.session.id])
+
     def test_indicateurs_de_la_liste_des_sessions(self):
         client = APIClient()
         client.force_authenticate(user=self.membre)
@@ -192,3 +205,70 @@ class CloisonnementCotisationsTestCase(TestCase):
             '/api/cotisations/999999/payer/', {'modePaiement': 'especes'}, format='json'
         )
         self.assertEqual(reponse.status_code, 404)
+
+
+class ModesPaiementCotisationTestCase(TestCase):
+    """Le trésorier enregistre toujours en espèces, y compris sa propre cotisation."""
+
+    @classmethod
+    def setUpTestData(cls):
+        gie = GIE.objects.create(nom='Alpha', region='Dakar', type_gie='groupement', code='ALPHA', statut='actif')
+
+        def creer(telephone, role):
+            return Utilisateur.objects.create_user(
+                telephone=telephone, nom='Nom', prenom='Prenom', role=role, gie=gie, statut='actif'
+            )
+
+        cls.tresorier = creer('770000001', 'tresorier')
+        cls.membre = creer('770000002', 'membre')
+        session = SessionCotisation.objects.create(
+            createur=cls.tresorier, gie=gie, libelle='Alpha', montant=5000,
+            date_debut=date(2026, 10, 1), date_fin=date(2026, 10, 31)
+        )
+        cls.cotisation = Cotisation.objects.create(session=session, membre=cls.membre)
+        cls.cotisation_tresorier = Cotisation.objects.create(session=session, membre=cls.tresorier)
+
+    def payer(self, utilisateur, cotisation, mode):
+        client = APIClient()
+        client.force_authenticate(user=utilisateur)
+        return client.post(f'/api/cotisations/{cotisation.id}/payer/', {'modePaiement': mode}, format='json')
+
+    def test_tresorier_paie_sa_propre_cotisation_en_especes(self):
+        reponse = self.payer(self.tresorier, self.cotisation_tresorier, 'especes')
+
+        self.assertEqual(reponse.status_code, 200)
+        self.cotisation_tresorier.refresh_from_db()
+        self.assertEqual(self.cotisation_tresorier.statut, 'paye')
+        # Il n'est pas notifié de son propre paiement
+        self.assertFalse(self.tresorier.notifications.filter(type='cotisation_payee_par_membre').exists())
+
+    def test_tresorier_ne_peut_pas_payer_sa_cotisation_en_ligne(self):
+        for mode in ('wave', 'orange_money'):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.payer(self.tresorier, self.cotisation_tresorier, mode).status_code, 400)
+        self.cotisation_tresorier.refresh_from_db()
+        self.assertEqual(self.cotisation_tresorier.statut, 'en_cours')
+
+    def test_tresorier_enregistre_la_cotisation_d_un_membre_en_especes_uniquement(self):
+        self.assertEqual(self.payer(self.tresorier, self.cotisation, 'wave').status_code, 400)
+        self.assertEqual(self.payer(self.tresorier, self.cotisation, 'especes').status_code, 200)
+
+    def test_membre_paie_pour_lui_meme_en_ligne_uniquement(self):
+        self.assertEqual(self.payer(self.membre, self.cotisation, 'especes').status_code, 400)
+
+    def test_paiement_en_ligne_revient_sur_le_site_utilise(self):
+        from unittest.mock import patch
+        client = APIClient()
+        client.force_authenticate(user=self.membre)
+        with patch('paiements.paydunya_service._RETURN_URL', 'https://public.example/paiement/retour'), \
+             patch('paiements.paydunya_service._CANCEL_URL', 'https://public.example/paiement/annule'), \
+             patch('cotisations.views.creer_facture', return_value={'token': 'jeton', 'url_paiement': 'https://paydunya'}) as facture:
+            reponse = client.post(
+                f'/api/cotisations/{self.cotisation.id}/payer/', {'modePaiement': 'wave'},
+                format='json', HTTP_ORIGIN='http://localhost:8080'
+            )
+
+        self.assertEqual(reponse.status_code, 200)
+        arguments = facture.call_args.kwargs
+        self.assertEqual(arguments['return_url'], f'http://localhost:8080/paiement/retour?type=cotisation&id={self.cotisation.id}')
+        self.assertEqual(arguments['cancel_url'], f'http://localhost:8080/paiement/annule?type=cotisation&id={self.cotisation.id}')

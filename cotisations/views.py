@@ -15,8 +15,9 @@ from paiements.paydunya_service import (
     creer_facture,
     PayDunyaError,
     PayDunyaNetworkError,
-    _RETURN_URL,
     construire_url_annulation,
+    construire_url_retour,
+    origine_requete,
 )
 
 # Modes qui déclenchent un paiement électronique via PayDunya
@@ -45,7 +46,9 @@ class SessionCotisationCreateView(generics.ListCreateAPIView):
                 filter=Q(cotisations__statut='paye'),
                 distinct=True
             ),
-        )
+        # Plus récente en premier. Explicite : Django ignore Meta.ordering dans
+        # une requête avec agrégation, et l'écran prend la première session ouverte.
+        ).order_by('-date_creation', '-id')
 
     def perform_create(self, serializer):
         session = serializer.save(createur=self.request.user)
@@ -157,12 +160,9 @@ class CotisationPaiementView(generics.GenericAPIView):
                 reference=reference,
                 nom_client=f"{membre.prenom} {membre.nom}",
                 telephone_client=membre.telephone or '',
-                return_url=(
-                    f"{_RETURN_URL}"
-                    f"?type=cotisation"
-                    f"&id={cotisation.id}"
-                ),
-                cancel_url=construire_url_annulation('cotisation', cotisation.id),
+                # Retour sur le site d'où le paiement est lancé (session conservée)
+                return_url=construire_url_retour('cotisation', cotisation.id, origine_requete(self.request)),
+                cancel_url=construire_url_annulation('cotisation', cotisation.id, origine_requete(self.request)),
             )
         except PayDunyaNetworkError as exc:
             return Response(
@@ -237,11 +237,13 @@ class CotisationPaiementView(generics.GenericAPIView):
                 objet_id=cotisation.id,
             )
         else:
+            # Sans le payeur : le trésorier qui règle sa propre cotisation
+            # n'a pas à être prévenu de son propre paiement
             tresoriers = Utilisateur.objects.filter(
                 gie=cotisation.membre.gie,
                 role='tresorier',
                 statut='actif',
-            )
+            ).exclude(id=request.user.id)
             if tresoriers.exists():
                 envoyer_notification(
                     destinataires=tresoriers,

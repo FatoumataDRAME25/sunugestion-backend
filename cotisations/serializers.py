@@ -139,10 +139,17 @@ class CotisationPaiementSerializer(serializers.Serializer):
         request = self.context.get('request')
         cotisation = self.context.get('cotisation')
 
-        # Si le membre paie pour lui-même → Wave ou Orange Money uniquement
-        # Si le trésorier paie pour un autre → Espèces uniquement
+        # Le trésorier enregistre toujours en espèces (sa propre cotisation
+        # comme celle d'un membre). Un membre qui paie pour lui-même passe par
+        # Wave ou Orange Money.
         if request and cotisation:
             paye_pour_soi = request.user == cotisation.membre
+            if request.user.role == 'tresorier':
+                if value != 'especes':
+                    raise serializers.ValidationError(
+                        "Le trésorier enregistre les paiements en espèces."
+                    )
+                return value
             if paye_pour_soi and value == 'especes':
                 raise serializers.ValidationError(
                     "Un membre qui paie pour lui-même doit utiliser Wave ou Orange Money."

@@ -109,10 +109,17 @@ class PretRemboursementSerializer(serializers.Serializer):
         request = self.context.get('request')
         pret = self.context.get('pret')
 
-        # Si le membre rembourse pour lui-même → Wave ou Orange Money uniquement
-        # Si le trésorier rembourse pour un autre → Espèces uniquement
+        # Le trésorier enregistre toujours en espèces (son propre prêt comme
+        # celui d'un membre). Un membre qui rembourse pour lui-même passe par
+        # Wave ou Orange Money.
         if request and pret:
             paye_pour_soi = request.user == pret.membre
+            if request.user.role == 'tresorier':
+                if value != 'especes':
+                    raise serializers.ValidationError(
+                        "Le trésorier enregistre les remboursements en espèces."
+                    )
+                return value
             if paye_pour_soi and value == 'especes':
                 raise serializers.ValidationError(
                     "Un membre qui rembourse pour lui-même doit utiliser Wave ou Orange Money."

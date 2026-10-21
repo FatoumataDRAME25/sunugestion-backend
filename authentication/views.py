@@ -59,7 +59,7 @@ class CreerGIEView(APIView):
         if serializer.is_valid():
             gie = serializer.save()
             return Response({
-                'message': 'GIE créé avec succès.',
+                'message': 'Organisation créée avec succès.',
                 'tokenInscription': gie.token_inscription,
                 'code': gie.code
             }, status=status.HTTP_201_CREATED)

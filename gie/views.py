@@ -21,7 +21,7 @@ class GieInfosView(generics.GenericAPIView):
         gie = request.user.gie
         if not gie:
             return Response(
-                {'detail': "Vous n'êtes rattaché à aucun GIE."},
+                {'detail': "Vous n'êtes rattaché à aucune organisation."},
                 status=status.HTTP_404_NOT_FOUND
             )
         serializer = GieSerializer(gie)
@@ -31,7 +31,7 @@ class GieInfosView(generics.GenericAPIView):
         gie = request.user.gie
         if not gie:
             return Response(
-                {'detail': "Vous n'êtes rattaché à aucun GIE."},
+                {'detail': "Vous n'êtes rattaché à aucune organisation."},
                 status=status.HTTP_404_NOT_FOUND
             )
         serializer = GieModifierSerializer(gie, data=request.data, partial=True)

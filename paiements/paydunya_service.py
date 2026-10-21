@@ -443,16 +443,74 @@ def verifier_decaissement(disburse_token: str) -> dict:
         "response_text": data.get("response_text", ""),
     }
 
-from urllib.parse import urlencode
-
-def construire_url_retour(type_paiement: str, objet_id: int) -> str:
-    sep = "&" if "?" in _RETURN_URL else "?"
-    return f"{_RETURN_URL}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 
-def construire_url_annulation(type_paiement: str, objet_id: int) -> str:
+# ─── Adresses de retour : même site que celui où le paiement a été lancé ─────
+# Après PayDunya, le navigateur revient sur return_url / cancel_url. Si cette
+# adresse est un autre site que celui utilisé (ex. ngrok alors qu'on est sur
+# localhost:8080), la session n'y existe pas : on arrive déconnecté. On reprend
+# donc l'adresse du site de la requête, si elle est autorisée. Le callback, lui,
+# reste l'adresse publique : c'est PayDunya qui l'appelle, pas le navigateur.
+
+# Adresses supplémentaires autorisées, séparées par des virgules
+# (ex. https://sunugestion.sn). Celles de PAYDUNYA_RETURN_URL / CANCEL_URL et
+# les adresses locales de développement le sont toujours.
+_ORIGINES_SITE = [
+    o.strip().rstrip("/")
+    for o in config("PAYDUNYA_ORIGINES_SITE", default="").split(",")
+    if o.strip()
+]
+_ORIGINES_LOCALES = {
+    "http://localhost:8080", "http://127.0.0.1:8080",
+    "http://localhost:4200", "http://127.0.0.1:4200",
+}
+
+
+def _origine_de(url: str) -> str:
+    parties = urlsplit(url or "")
+    return f"{parties.scheme}://{parties.netloc}" if parties.scheme and parties.netloc else ""
+
+
+def _origines_autorisees() -> set:
+    origines = set(_ORIGINES_SITE) | _ORIGINES_LOCALES
+    for url in (_RETURN_URL, _CANCEL_URL):
+        if _origine_de(url):
+            origines.add(_origine_de(url))
+    return origines
+
+
+def origine_requete(request) -> str:
+    """
+    Adresse du site depuis lequel la personne lance le paiement (en-tête Origin,
+    sinon Referer). Chaîne vide si absente ou non autorisée : l'adresse
+    configurée est alors utilisée (pas de redirection vers un site inconnu).
+    """
+    if request is None:
+        return ""
+    candidat = request.headers.get("Origin") or _origine_de(request.headers.get("Referer", ""))
+    candidat = (candidat or "").rstrip("/")
+    return candidat if candidat in _origines_autorisees() else ""
+
+
+def _sur_origine(url: str, origine: str) -> str:
+    """Remplace le site de l'URL configurée par l'origine donnée (chemin conservé)."""
+    if not origine or not url:
+        return url
+    parties, site = urlsplit(url), urlsplit(origine)
+    return urlunsplit((site.scheme, site.netloc, parties.path, parties.query, parties.fragment))
+
+
+def construire_url_retour(type_paiement: str, objet_id: int, origine: str = "") -> str:
+    base = _sur_origine(_RETURN_URL, origine)
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"
+
+
+def construire_url_annulation(type_paiement: str, objet_id: int, origine: str = "") -> str:
     """Page « Paiement annulé » : le type et l'id permettent d'y revenir au bon endroit."""
     if not _CANCEL_URL:
         return ""
-    sep = "&" if "?" in _CANCEL_URL else "?"
-    return f"{_CANCEL_URL}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"
+    base = _sur_origine(_CANCEL_URL, origine)
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}{urlencode({'type': type_paiement, 'id': objet_id})}"
