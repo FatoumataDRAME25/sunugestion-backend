@@ -5,7 +5,9 @@ from rest_framework.test import APIClient
 
 from authentication.models import GIE, Utilisateur
 from historiques.models import HistoriqueOperation
-from paiements.paydunya_service import PayDunyaNetworkError, construire_url_annulation
+from paiements.paydunya_service import (
+    PayDunyaNetworkError, construire_url_annulation, construire_url_retour, origine_requete,
+)
 from prets.models import Pret, ReglePret
 
 
@@ -187,6 +189,10 @@ class DoubleDecaissementTestCase(PretsMixin, TestCase):
     """Un envoi PayDunya déjà lancé ne doit jamais être doublé."""
 
     def setUp(self):
+        # Parcours PayDunya réel (en mode test, le décaissement est simulé)
+        mode_live = patch('paiements.paydunya_service.PAYDUNYA_MODE', 'live')
+        mode_live.start()
+        self.addCleanup(mode_live.stop)
         self.pret = Pret.objects.create(
             membre=self.membre, montant=20000, statut='approuve', duree_mois=3,
             mode_paiement='wave', token_decaissement_paydunya='jeton-envoi-1'
@@ -254,6 +260,87 @@ class DoubleDecaissementTestCase(PretsMixin, TestCase):
         self.assertEqual(self.pret.statut, 'en_cours')
 
 
+class DecaissementModeTestCase(PretsMixin, TestCase):
+    """PayDunya n'accepte les décaissements qu'avec des clés LIVE : en mode test, ils sont simulés."""
+
+    def setUp(self):
+        self.pret = Pret.objects.create(membre=self.membre, montant=20000, statut='approuve', duree_mois=3)
+
+    def decaisser(self, mode):
+        return self.client_de(self.tresorier).post(
+            f'/api/prets/{self.pret.id}/decaisser/', {'modePaiement': mode}, format='json'
+        )
+
+    def test_mode_test_simule_le_decaissement_sans_appeler_paydunya(self):
+        for mode in ('wave', 'orange_money'):
+            with self.subTest(mode=mode):
+                Pret.objects.filter(pk=self.pret.pk).update(statut='approuve', mode_paiement=None, date_echeance=None)
+                HistoriqueOperation.objects.filter(pret=self.pret).delete()
+                with patch('paiements.paydunya_service.PAYDUNYA_MODE', 'test'), \
+                     patch('prets.views.initier_decaissement') as initier, \
+                     patch('prets.views.soumettre_decaissement') as soumettre:
+                    reponse = self.decaisser(mode)
+
+                self.assertEqual(reponse.status_code, 200)
+                initier.assert_not_called()
+                soumettre.assert_not_called()
+                self.pret.refresh_from_db()
+                self.assertEqual(self.pret.statut, 'en_cours')
+                self.assertEqual(self.pret.mode_paiement, mode)
+                self.assertIsNotNone(self.pret.date_echeance)
+                sortie = HistoriqueOperation.objects.get(pret=self.pret, type_operation='sortie')
+                self.assertEqual(int(sortie.montant), 20000)
+
+    def test_mode_live_passe_par_paydunya(self):
+        with patch('paiements.paydunya_service.PAYDUNYA_MODE', 'live'), \
+             patch('prets.views.initier_decaissement', return_value={'disburse_token': 'jeton'}) as initier, \
+             patch('prets.views.soumettre_decaissement', return_value={'status': 'pending'}):
+            reponse = self.decaisser('wave')
+
+        self.assertEqual(reponse.status_code, 200)
+        initier.assert_called_once()
+        self.assertEqual(initier.call_args.kwargs['telephone_beneficiaire'], '770000003')
+        self.pret.refresh_from_db()
+        self.assertEqual(self.pret.statut, 'approuve')
+        self.assertFalse(HistoriqueOperation.objects.filter(pret=self.pret, type_operation='sortie').exists())
+
+    def test_prefixe_221_retire_sans_toucher_au_reste_du_numero(self):
+        membre = Utilisateur.objects.create_user(
+            telephone='+221771234567', nom='Nom', prenom='Prenom', role='membre', gie=self.gie, statut='actif'
+        )
+        pret = Pret.objects.create(membre=membre, montant=20000, statut='approuve', duree_mois=3)
+        with patch('paiements.paydunya_service.PAYDUNYA_MODE', 'live'), \
+             patch('prets.views.initier_decaissement', return_value={'disburse_token': 'jeton'}) as initier, \
+             patch('prets.views.soumettre_decaissement', return_value={'status': 'pending'}):
+            self.client_de(self.tresorier).post(f'/api/prets/{pret.id}/decaisser/', {'modePaiement': 'wave'}, format='json')
+
+        self.assertEqual(initier.call_args.kwargs['telephone_beneficiaire'], '771234567')
+
+
+class ModesRemboursementTestCase(PretsMixin, TestCase):
+    """Le trésorier rembourse toujours en espèces, y compris son propre prêt."""
+
+    def rembourser(self, utilisateur, pret, mode):
+        return self.client_de(utilisateur).post(
+            f'/api/prets/{pret.id}/rembourser/', {'modePaiement': mode}, format='json'
+        )
+
+    def test_tresorier_rembourse_son_propre_pret_en_especes(self):
+        pret = Pret.objects.create(membre=self.tresorier, montant=20000, statut='en_cours', duree_mois=3)
+
+        for mode in ('wave', 'orange_money'):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.rembourser(self.tresorier, pret, mode).status_code, 400)
+
+        self.assertEqual(self.rembourser(self.tresorier, pret, 'especes').status_code, 200)
+        pret.refresh_from_db()
+        self.assertEqual(pret.statut, 'rembourse')
+
+    def test_membre_rembourse_pour_lui_meme_en_ligne_uniquement(self):
+        pret = Pret.objects.create(membre=self.membre, montant=20000, statut='en_cours', duree_mois=3)
+        self.assertEqual(self.rembourser(self.membre, pret, 'especes').status_code, 400)
+
+
 class UrlAnnulationPaiementTestCase(TestCase):
 
     def test_url_annulation_contient_type_et_id(self):
@@ -266,3 +353,41 @@ class UrlAnnulationPaiementTestCase(TestCase):
     def test_sans_url_configuree_rien_n_est_envoye(self):
         with patch('paiements.paydunya_service._CANCEL_URL', ''):
             self.assertEqual(construire_url_annulation('pret', 3), '')
+
+
+class OrigineRetourPaiementTestCase(TestCase):
+    """Le retour PayDunya ramène sur le site d'où le paiement a été lancé (session conservée)."""
+
+    RETOUR = 'https://exemple.ngrok-free.dev/paiement/retour'
+    ANNULATION = 'https://exemple.ngrok-free.dev/paiement/annule'
+
+    def setUp(self):
+        for nom, valeur in (('_RETURN_URL', self.RETOUR), ('_CANCEL_URL', self.ANNULATION)):
+            p = patch(f'paiements.paydunya_service.{nom}', valeur)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def requete(self, **entetes):
+        from django.test import RequestFactory
+        return RequestFactory().post('/', **entetes)
+
+    def test_retour_sur_l_adresse_locale_utilisee(self):
+        origine = origine_requete(self.requete(HTTP_ORIGIN='http://localhost:8080'))
+        self.assertEqual(origine, 'http://localhost:8080')
+        self.assertEqual(construire_url_retour('cotisation', 5, origine),
+                         'http://localhost:8080/paiement/retour?type=cotisation&id=5')
+        self.assertEqual(construire_url_annulation('cotisation', 5, origine),
+                         'http://localhost:8080/paiement/annule?type=cotisation&id=5')
+
+    def test_origine_lue_dans_le_referer_si_absente(self):
+        requete = self.requete(HTTP_REFERER='http://localhost:8080/mon-espace/cotisations')
+        self.assertEqual(origine_requete(requete), 'http://localhost:8080')
+
+    def test_adresse_publique_configuree_acceptee(self):
+        self.assertEqual(origine_requete(self.requete(HTTP_ORIGIN='https://exemple.ngrok-free.dev')),
+                         'https://exemple.ngrok-free.dev')
+
+    def test_site_inconnu_ignore(self):
+        origine = origine_requete(self.requete(HTTP_ORIGIN='https://site-pirate.example'))
+        self.assertEqual(origine, '')
+        self.assertEqual(construire_url_retour('pret', 3, origine), f'{self.RETOUR}?type=pret&id=3')

@@ -219,7 +219,7 @@ class ActiviteViewSet(viewsets.ModelViewSet):
                     {
                         'message': (
                             f'Le membre {utilisateur.id} '
-                            'n\u2019appartient pas à ce GIE.'
+                            'n\u2019appartient pas à cette organisation.'
                         )
                     },
                     status=400

@@ -10,6 +10,13 @@ class SessionCotisation(models.Model):
         ('cloturee', 'Clôturée'),
     ]
 
+    # Groupement propriétaire de la session : ne dépend pas de son créateur,
+    # qui pourrait un jour changer de groupement ou en être retiré
+    gie = models.ForeignKey(
+        'authentication.GIE',
+        on_delete=models.PROTECT,
+        related_name='sessions_cotisation'
+    )
     createur = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -30,7 +37,7 @@ class SessionCotisation(models.Model):
     date_creation = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.libelle} — {self.createur.gie}"
+        return f"{self.libelle} — {self.gie}"
 
     class Meta:
         verbose_name = "Session de cotisation"

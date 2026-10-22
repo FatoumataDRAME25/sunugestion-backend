@@ -60,7 +60,7 @@ class EstMembreGIE(BasePermission):
     Autorise uniquement les utilisateurs appartenant à un GIE.
     Bloque explicitement l'administrateur plateforme.
     """
-    message = "Accès réservé aux membres d'un GIE."
+    message = "Accès réservé aux membres d'une organisation."
 
     def has_permission(self, request, view):
         return (

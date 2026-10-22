@@ -198,7 +198,7 @@ class MembreViewSet(viewsets.ViewSet):
                     statut='actif',
                 ).exclude(id=request.user.id),
                 titre='Nouveau membre ajouté',
-                message=f'{membre.prenom} {membre.nom} a été ajouté au GIE.',
+                message=f"{membre.prenom} {membre.nom} a été ajouté à l'organisation.",
                 type_evenement='nouveau_membre',
                 module='membres',
                 objet_id=membre.id,

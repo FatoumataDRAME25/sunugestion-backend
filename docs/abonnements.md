@@ -36,10 +36,10 @@ Gestion des abonnements des groupements (instances) : essai gratuit, tarif mensu
 
 | Membres actifs | Prix affiché | Prix appliqué avec la tolérance |
 |---|---|---|
-| jusqu'à 15 | 5 000 FCFA | jusqu'à 17 membres |
-| 16 à 34 | 10 000 FCFA | de 18 à 36 membres |
-| 35 à 50 | 15 000 FCFA | de 37 à 52 membres |
-| plus de 50 | 20 000 FCFA | à partir de 53 membres |
+| jusqu'à 15 | 2 900 FCFA | jusqu'à 17 membres |
+| 16 à 34 | 3 900 FCFA | de 18 à 36 membres |
+| 35 à 50 | 4 900 FCFA | de 37 à 52 membres |
+| plus de 50 | 5 900 FCFA | à partir de 53 membres |
 
 La grille et la tolérance sont définies dans `abonnements/services.py` (`PALIERS`, `TOLERANCE_MEMBRES`). C'est le seul endroit à modifier pour changer un prix : la facturation, la page d'accueil et l'inscription lisent cette même grille. Le délai de grâce est défini dans `abonnements/models.py` (`DELAI_GRACE_JOURS`) et la durée d'essai dans `abonnements/services.py` (`DUREE_ESSAI_JOURS`).
 
